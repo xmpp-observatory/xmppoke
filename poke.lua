@@ -8,7 +8,6 @@ end
 local jid = host;
 
 local ssl = require("ssl");
-local x509 = require("ssl.x509");
 local io = require("io");
 local os = require("os");
 local ciphertable = require("ciphertable");
@@ -101,8 +100,12 @@ local function pretty_fingerprint(hash)
 end
 
 local function print_errors(print, errors)
-    for depth, t in pairs(errors) do
-        print(("    %d: %s"):format(depth-1, table.concat(t, "\n       ")));
+    if type(errors) == "string" then
+        print("    0: " .. errors);
+    else
+        for depth, t in pairs(errors) do
+            print(("    %d: %s"):format(depth-1, table.concat(t, "\n       ")));
+        end
     end
 end
 
