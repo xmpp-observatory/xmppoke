@@ -21,5 +21,5 @@ This will initiate a number of c2s connections to example.com, to test the TLS c
 
 There's a couple of configuration variables in `poke.lua` that can be changed:
 
-* `use_html`: if true, writes a html formatted report to `reports/example.com.html`.
+* `use_html`: if true, writes a html formatted report to `reports/example.com.html`, otherwise it will show the output in the terminal.
 * `sleep_for`: determines the time between consecutive connection attempts.
