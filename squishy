@@ -1,0 +1,43 @@
+Output "xmppoke.lua"
+
+AutoFetchURL "http://hg.prosody.im/0.9/raw-file/381e0b874e6d/?"
+
+Module "util.stanza"		"util/stanza.lua"
+Module "util.timer"		"util/timer.lua"
+-- Module "util.termcolours"	"util/termcolours.lua"
+-- Module "util.uuid"		"util/uuid.lua"
+Module "net.dns"               "net/dns.lua"
+Module "net.adns"              "net/adns.lua"
+Module "net.server"		"net/server_select.lua"
+Module "util.xmppstream"	"util/xmppstream.lua"
+Module "util.jid"		"util/jid.lua"
+Module "util.events"		"util/events.lua"
+Module "util.caps"		"util/caps.lua"
+Module "util.logger"		"util/logger.lua"
+Module "util.datetime"		"util/datetime.lua"
+
+AutoFetchURL "http://hg.prosody.im/0.9/raw-file/bb27ba619932/?"
+
+Module "util.x509"		"util/x509.lua"
+
+AutoFetchURL "http://code.matthewwild.co.uk/verse/raw-file/34b878d58948/?"
+
+-- Module "util.encodings"		"libs/encodings.lua"
+
+Module "verse" "init.lua"
+Module "verse.client" "client.lua"
+
+-- Verse plugins
+plugins = {
+	"tls", "sasl", "bind", "session", "legacy", "compression";
+	"presence", "private", "roster", "register";
+}
+
+AutoFetchURL "http://code.matthewwild.co.uk/verse/raw-file/34b878d58948/?"
+
+for _, plugin in ipairs(plugins) do
+	Module("verse.plugins."..plugin)("plugins/"..plugin..".lua")
+end
+
+-- Main verse file
+Main "poke.lua"
