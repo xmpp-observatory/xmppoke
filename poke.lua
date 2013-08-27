@@ -205,6 +205,38 @@ function test_cert()
                 i = i + 1;
             end
 
+            line();
+
+            local last_cert = conn:getpeercertificate(i - 1);
+
+            local function deep_equal(a, b)
+                if type(a) ~= type(b) then
+                    return false;
+                end
+                if type(a) == "table" then
+                    for k,_ in pairs(a) do
+                        if not deep_equal(a[k], b[k]) then
+                            return false;
+                        end
+                    end
+                    for k,_ in pairs(b) do
+                        if not deep_equal(a[k], b[k]) then
+                            return false;
+                        end
+                    end
+                    return true;
+                end
+                return a == b;
+            end
+
+            -- Hack: if the subject is identical, we assume the server sent its root CA too.
+            if deep_equal(last_cert:issuer(), last_cert:subject()) then
+                print(red .. "Root CA certificate was included in chain." .. reset);
+            else
+                print("Root CA: ");
+                print_subject(print, last_cert:issuer());
+            end
+
             local certificate_score = 0;
 
             if chain_valid and valid_identity then
