@@ -15,9 +15,9 @@ local ciphertable = require("ciphertable");
 local cert_verify_identity = require "util.x509".verify_identity;
 
 local boldred, red, boldgreen, green, boldblue, reset;
-local use_html = false;
+local use_html = true;
 
-local sleep_for = 1;
+local sleep_for = 0.2;
 
 if not use_html then
     boldred = string.char(0x1b) .. "[31;1m";
@@ -78,7 +78,7 @@ end
 require("verse").init("client");
 
 -- if use_html then
---     verse.set_log_handler(function(part, level, str) io.stdout:write(part .. "  " .. level .. "\t\t" .. str .. "\n") end);
+    -- verse.set_log_handler(function(part, level, str) io.stdout:write(part .. "  " .. level .. "\t\t" .. str .. "\n") end);
 -- end
 
 local total_score = 0;
@@ -408,7 +408,8 @@ co = coroutine.create(function ()
     local cipher_string = "ALL:COMPLEMENTOFALL";
     local ciphers = {};
 
-    for k,v in ipairs(protocols) do
+    for i=#protocols,1,-1 do
+        local v = protocols[i];
         while true do
             test_params({ mode = "client", options = {}, protocol = v, ciphers = cipher_string });
 
@@ -422,20 +423,54 @@ co = coroutine.create(function ()
        end
     end
 
-    table.sort(ciphers, function (a, b)
-        if a.bits == b.bits then
-            if a.protocol == b.protocol then
-                return a.cipher < b.cipher;
-            else
-                return a.protocol > b.protocol;
-            end
+    local should_sort = true;
+
+    if #ciphers > 1 then
+        local cipher1 = ciphers[1];
+        local cipher2 = ciphers[2];
+        local protocol = protocols[#protocols];
+
+        params = { mode = "client", protocol = protocol };
+        params.ciphers = cipher1.cipher .. ":" .. cipher2.cipher;
+        test_params(params);
+        local result1 = coroutine.yield();
+
+        params = { mode = "client", protocol = protocol };
+        params.ciphers = cipher2.cipher .. ":" .. cipher1.cipher;
+        test_params(params);
+        local result2 = coroutine.yield();
+
+        if not result1 or not result2 then
+            print(red .. "Problem with testing server's ordering." .. reset);
+        elseif result1.cipher == result2.cipher then
+            print("Server does " .. red .. "not" .. reset .. " respect client's cipher ordering. Server's order:");
+            should_sort = false;
         else
-            return a.bits > b.bits;
+            print("Server does respect client's cipher ordering.");
         end
-    end)
+    end
+
+    if should_sort then
+        table.sort(ciphers, function (a, b)
+            if a.bits == b.bits then
+                if a.protocol == b.protocol then
+                    return a.cipher < b.cipher;
+                else
+                    return a.protocol > b.protocol;
+                end
+            else
+                return a.bits > b.bits;
+            end
+        end);
+    end
+
+    local max_bits = 0;
+    local min_bits = math.huge;
 
     for k,v in ipairs(ciphers) do
         print(pretty_cipher(v));
+        if v.bits < min_bits then min_bits = v.bits; end;
+        if v.bits > max_bits then max_bits = v.bits; end;
     end
 
     local function cipher_score(bits)
@@ -445,7 +480,7 @@ co = coroutine.create(function ()
         return 100
     end
 
-    local cipher_score = (cipher_score(ciphers[1].bits) + cipher_score(ciphers[#ciphers].bits))/2;
+    local cipher_score = (cipher_score(max_bits) + cipher_score(min_bits))/2;
 
     print(green .. "Cipher score: " .. cipher_score .. reset);
 
