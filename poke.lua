@@ -15,12 +15,8 @@ local use_html = opts.html;
 local sleep_for = tonumber(opts.delay);
 local mode = opts.mode;
 
-for k,v in pairs(opts) do
-    print(k,v)
-end
-
 if not host or (mode ~= "server" and mode ~= "client") then
-    print(string.format("Usage: %s [-v] [-h] [-o output] [-m (server|client)] [-d=seconds] [hostname]", arg[0]));
+    print(string.format("Usage: %s [-v] [-h] [-o output] [-m (server|client)] [-d=seconds] hostname", arg[0]));
     os.exit();
 end
 
@@ -134,19 +130,52 @@ local function keysize_score(bits)
     return 100;
 end
 
+default_params = { mode = "client",
+                  verify = {"peer","fail_if_no_peer_cert"},
+                  verifyext = {"lsec_continue", "crl_check_chain"},
+                  cafile = "/opt/local/etc/openssl/cert.pem",
+                  -- key = "certs/server.key",
+                  -- certificate = "certs/server.crt",
+                  };
+
 function test_cert()
     local c = verse.new();
     local done = false;
 
-    c.tlsparams = { mode = "client",
-                    protocol = "sslv3",
-                    verify = {"peer","fail_if_no_peer_cert"},
-                    verifyext = {"lsec_continue", "crl_check_chain"},
-                    cafile = "/opt/local/etc/openssl/cert.pem" };
+    c.tlsparams = deepcopy(default_params);
+    c.tlsparams.protocol = "sslv23";
+
+    c:hook("outgoing-raw", function (data) return c:debug("OUT: " .. data); end);
+    c:hook("incoming-raw", function (data) return c:debug("IN: " .. data); end);
+
+    c:hook("stream-features", function (features_stanza)
+        local stanza = features_stanza:get_child("starttls", "urn:ietf:params:xml:ns:xmpp-tls");
+
+        if stanza and stanza:get_child("required") then
+            print("Server " .. green .. "requires" .. reset .. " starttls.");
+        elseif stanza then
+            print("Server allows starttls.");
+        else
+            print(boldred .. "Server does not offer starttls!" .. reset);
+            os.exit();
+        end
+    end, 1000);
 
     c:hook("status", function (status)
         if status == "ssl-handshake-complete" and not done then
+
             local conn = c.conn:socket();
+
+            if not conn.getpeercertificate then
+                line();
+
+                print(boldred .. "No TLS support detected!" .. reset);
+
+                line();
+                finish();
+                os.exit();
+            end
+
             local cert = conn:getpeercertificate();
 
             line();
@@ -349,28 +378,79 @@ local function pretty_cipher(info)
     return info.protocol .. " " .. info.cipher .. " (" .. color_bits(info.bits) .. ") " .. string.format("0x%02X", ciphertable.find(info.cipher)) .. judgement;
 end
 
-local function print_result(info, err)
+local function print_cipher_result(info, err)
     if err then
         print(red .. "Fail: " .. err .. reset);
-        return false;
     else
         print("OK: " .. pretty_cipher(info));
+    end
+end
+
+local function print_result(bad, info, err)
+    if err then
+        if bad then print_no_nl(green); end
+        if not bad then print_no_nl(red); end
+        print("No." .. reset);
+        return false;
+    else
+        if bad == true then print_no_nl(red); end
+        if bad == false then print_no_nl(green); end
+        print("Yes." .. reset);
         return true;
     end
 end
 
+function deepcopy(orig)
+    local orig_type = type(orig);
+    local copy;
+    if orig_type == 'table' then
+        copy = {};
+        for orig_key, orig_value in next, orig, nil do
+            copy[deepcopy(orig_key)] = deepcopy(orig_value);
+        end
+        setmetatable(copy, deepcopy(getmetatable(orig)));
+    else
+        copy = orig;
+    end
+    return copy;
+end
+
 co = coroutine.create(function ()
+    local params;
+
     test_cert();
 
     coroutine.yield();
+
+    if mode == "server" then
+        params = deepcopy(default_params);
+        params.key = nil;
+        params.certificate = nil;
+        params.protocol = "sslv23";
+
+        test_params(params);
+
+        local info, err = coroutine.yield();
+
+        if not info then
+            print("Server " .. green .. "requires" .. reset .. " initiating server to present a certificate.");
+        else
+            print("Server does not require the initiating server to present a certificate.");
+        end
+
+        line();
+    end
 
     local protocols = {};
     local lowest_protocol, highest_protocol;
 
     print("Testing protocol support:");
     print_no_nl("Testing SSLv2 support... ");
-    test_params({ mode = "client", options = {"no_sslv3"}, protocol = "sslv2" });
-    if print_result(coroutine.yield()) then
+    params = default_params;
+    params.options = {"no_sslv3"};
+    params.protocol = "sslv2";
+    test_params(params);
+    if print_result(true, coroutine.yield()) then
         protocols[#protocols + 1] = "sslv2";
         lowest_protocol = 20;
         highest_protocol = 20;
@@ -378,32 +458,45 @@ co = coroutine.create(function ()
     end
     
     print_no_nl("Testing SSLv3 support... ");
-    test_params({ mode = "client", options = {"no_sslv2"}, protocol = "sslv3" });
-    if print_result(coroutine.yield()) then
+    
+    params = deepcopy(default_params);
+    params.options = {"no_sslv2"};
+    params.protocol = "sslv3";
+    test_params(params);
+    if print_result(nil, coroutine.yield()) then
         protocols[#protocols + 1] = "sslv3";
         if not lowest_protocol then lowest_protocol = 80; end
         highest_protocol = 80;
     end
 
     print_no_nl("Testing TLSv1 support... ");
-    test_params({ mode = "client", options = {"no_sslv3"}, protocol = "tlsv1" });
-    if print_result(coroutine.yield()) then
+    params = deepcopy(default_params);
+    params.options = {"no_sslv3"};
+    params.protocol = "tlsv1";
+    test_params(params);
+    if print_result(nil, coroutine.yield()) then
         protocols[#protocols + 1] = "tlsv1";
         if not lowest_protocol then lowest_protocol = 90; end
         highest_protocol = 90;
     end
    
     print_no_nl("Testing TLSv1.1 support... ");
-    test_params({ mode = "client", options = {"no_sslv3","no_tlsv1"}, protocol = "tlsv1_1" });
-    if print_result(coroutine.yield()) then
+    params = deepcopy(default_params);
+    params.options = {"no_sslv3","no_tlsv1"};
+    params.protocol = "tlsv1_1";
+    test_params(params);
+    if print_result(false, coroutine.yield()) then
         protocols[#protocols + 1] = "tlsv1_1";
         if not lowest_protocol then lowest_protocol = 95; end
         highest_protocol = 95;
     end
 
     print_no_nl("Testing TLSv1.2 support... ");
-    test_params({ mode = "client", options = {"no_sslv3","no_tlsv1","no_tlsv1_1"}, protocol = "tlsv1_2" });
-    if print_result(coroutine.yield()) then
+    params = deepcopy(default_params);
+    params.options = {"no_sslv3","no_tlsv1","no_tlsv1_1"};
+    params.protocol = "tlsv1_2";
+    test_params(params);
+    if print_result(false, coroutine.yield()) then
         protocols[#protocols + 1] = "tlsv1_2";
         if not lowest_protocol then lowest_protocol = 100; end
         highest_protocol = 100;
@@ -424,7 +517,10 @@ co = coroutine.create(function ()
     for i=#protocols,1,-1 do
         local v = protocols[i];
         while true do
-            test_params({ mode = "client", options = {}, protocol = v, ciphers = cipher_string });
+            local params = deepcopy(default_params);
+            params.protocol = v;
+            params.ciphers = cipher_string;
+            test_params(params);
 
             local info, err = coroutine.yield();
 
@@ -443,12 +539,14 @@ co = coroutine.create(function ()
         local cipher2 = ciphers[2];
         local protocol = protocols[#protocols];
 
-        params = { mode = "client", protocol = protocol };
+        local params = deepcopy(default_params);
+        params.protocol = protocol;
         params.ciphers = cipher1.cipher .. ":" .. cipher2.cipher;
         test_params(params);
         local result1 = coroutine.yield();
 
-        params = { mode = "client", protocol = protocol };
+        local params = deepcopy(default_params);
+        params.protocol = protocol;
         params.ciphers = cipher2.cipher .. ":" .. cipher1.cipher;
         test_params(params);
         local result2 = coroutine.yield();
@@ -506,102 +604,117 @@ co = coroutine.create(function ()
 
         print_no_nl("Simulating Adium 1.5.7 on OS X 10.8... ");
 
-        params = { mode = "client", protocol = "tlsv1", options = {"no_sslv2", "no_tlsv1_1", "no_tlsv1_2"} };
+        params = deepcopy(default_params);
+        params.protocol = "tlsv1";
+        params.options = {"no_sslv2", "no_tlsv1_1", "no_tlsv1_2"};
         params.ciphers = "AES128-SHA:RC4-SHA:RC4-MD5:AES256-SHA:DES-CBC3-SHA:EXP-RC4-MD5:DHE-RSA-AES128-SHA:DHE-RSA-AES256-SHA:EDH-RSA-DES-CBC3-SHA";
         test_params(params);
-        print_result(coroutine.yield());
+        print_cipher_result(coroutine.yield());
 
         print_no_nl("Simulating Adium 1.5.8hg on OS X 10.8... ");
 
-        params = { mode = "client", protocol = "tlsv1", options = {"no_sslv2"} };
+        params = deepcopy(default_params);
+        params.protocol = "tlsv1";
+        params.options = {"no_sslv2"};
         params.ciphers = "ECDHE-ECDSA-AES256-SHA:ECDHE-ECDSA-AES128-SHA:ECDHE-ECDSA-RC4-SHA:ECDHE-ECDSA-DES-CBC3-SHA:ECDHE-RSA-AES256-SHA:ECDHE-RSA-AES128-SHA:ECDHE-RSA-RC4-SHA:ECDHE-RSA-DES-CBC3-SHA:ECDH-ECDSA-AES128-SHA:ECDH-ECDSA-AES256-SHA:ECDH-ECDSA-RC4-SHA:ECDH-ECDSA-DES-CBC3-SHA:ECDH-RSA-AES128-SHA:ECDH-RSA-AES256-SHA:ECDH-RSA-RC4-SHA:ECDH-RSA-DES-CBC3-SHA:AES128-SHA:RC4-SHA:RC4-MD5:AES256-SHA:DES-CBC3-SHA:DHE-RSA-AES128-SHA:DHE-RSA-AES256-SHA:EDH-RSA-DES-CBC3-SHA";
         test_params(params);
-        print_result(coroutine.yield());    
+        print_cipher_result(coroutine.yield());    
 
         print_no_nl("Simulating Pidgin 2.10.7 on Windows 8... ");
 
-        params = { mode = "client", protocol = "tlsv1", options = {"no_sslv2", "no_tlsv1_1", "no_tlsv1_2"} };
+        params.protocol = "tlsv1";
+        params.options = {"no_sslv2", "no_tlsv1_1", "no_tlsv1_2"};
         params.ciphers = "DHE-RSA-AES256-SHA:DHE-DSS-AES256-SHA:AES256-SHA:DSS-RC4-SHA:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA:RC4-SHA:RC4-MD5:AES128-SHA:EDH-RSA-DES-CBC3-SHA:EDH-DSS-DES-CBC3-SHA:SSL_RSA_FIPS_WITH_3DES_EDE_CBC_SHA:DES-CBC3-SHA:EDH-RSA-DES-CBC-SHA:EDH-DSS-DES-CBC-SHA:SSL_RSA_FIPS_WITH_DES_CBC_SHA:DES-CBC-SHA:EXP1024-RC4-SHA:EXP1024-DES-CBC-SHA:EXP-RC4-MD5:EXP-RC2-CBC-MD5";
         test_params(params);
-        print_result(coroutine.yield());
+        print_cipher_result(coroutine.yield());
 
         print_no_nl("Simulating Gajim 0.15.4 on Windows 8... ");
 
-        params = { mode = "client", protocol = "tlsv1", options = {"no_sslv2", "no_tlsv1_1", "no_tlsv1_2"} };
+        params.protocol = "tlsv1";
+        params.options = {"no_sslv2", "no_tlsv1_1", "no_tlsv1_2"};
         params.ciphers = "DHE-RSA-AES256-SHA:DHE-DSS-AES256-SHA:AES256-SHA:EDH-RSA-DES-CBC3-SHA:EDH-DSS-DES-CBC3-SHA:DES-CBC3-SHA:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA:AES128-SHA:IDEA-CBC-SHA:RC4-SHA:RC4-MD5:EDH-RSA-DES-CBC-SHA:EDH-DSS-DES-CBC-SHA:DES-CBC-SHA:EXP-EDH-RSA-DES-CBC-SHA:EXP-EDH-DSS-DES-CBC-SHA:EXP-DES-CBC-SHA:EXP-RC2-CBC-MD5:EXP-RC4-MD5";
         test_params(params);
-        print_result(coroutine.yield());
+        print_cipher_result(coroutine.yield());
 
         print_no_nl("Simulating Jitsi 2.2.4603.9615 on Windows 8... ");
 
-        params = { mode = "client", protocol = "tlsv1", options = {"no_sslv2", "no_tlsv1_1", "no_tlsv1_2"} };
+        params.protocol = "tlsv1";
+        params.options = {"no_sslv2", "no_tlsv1_1", "no_tlsv1_2"};
         params.ciphers = "ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES128-SHA:AES128-SHA:ECDH-ECDSA-AES128-SHA:ECDH-RSA-AES128-SHA:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA:ECDHE-ECDSA-RC4-SHA:ECDHE-RSA-RC4-SHA:RC4-SHA:ECDH-ECDSA-RC4-SHA:ECDH-RSA-RC4-SHA:ECDHE-ECDSA-DES-CBC3-SHA:ECDHE-RSA-DES-CBC3-SHA:DES-CBC3-SHA:ECDH-ECDSA-DES-CBC3-SHA:ECDH-RSA-DES-CBC3-SHA:EDH-RSA-DES-CBC3-SHA:EDH-DSS-DES-CBC3-SHA:RC4-MD5";
         test_params(params);
-        print_result(coroutine.yield());
+        print_cipher_result(coroutine.yield());
 
         print_no_nl("Simulating Jitsi 2.2.4603.9615 on OS X 10.8... ");
 
-        params = { mode = "client", protocol = "sslv23", options = {"no_tlsv1_1", "no_tlsv1_2"} };
+        params.protocol = "sslv23";
+        params.options = {"no_tlsv1_1", "no_tlsv1_2"};
         params.ciphers = "RC4-MD5:RC4-MD5:RC4-SHA:AES128-SHA:AES256-SHA:DHE-RSA-AES128-SHA:DHE-RSA-AES256-SHA:DHE-DSS-AES128-SHA:DHE-DSS-AES256-SHA:DES-CBC3-SHA:DES-CBC3-MD5:EDH-RSA-DES-CBC3-SHA:EDH-DSS-DES-CBC3-SHA:DES-CBC-SHA:DES-CBC-MD5:EDH-RSA-DES-CBC-SHA:EDH-DSS-DES-CBC-SHA:EXP-RC4-MD5:EXP-RC4-MD5:EXP-DES-CBC-SHA:EXP-EDH-RSA-DES-CBC-SHA:EXP-EDH-DSS-DES-CBC-SHA";
         test_params(params);
-        print_result(coroutine.yield());
+        print_cipher_result(coroutine.yield());
 
         print_no_nl("Simulating Psi 0.15 on OS X 10.8... ");
 
-        params = { mode = "client", protocol = "sslv23", options = {"no_tlsv1_1", "no_tlsv1_2"} };
+        params.protocol = "sslv23";
+        params.options = {"no_tlsv1_1", "no_tlsv1_2"};
         params.ciphers = "DHE-RSA-AES256-SHA:DHE-DSS-AES256-SHA:AES256-SHA:EDH-RSA-DES-CBC3-SHA:EDH-DSS-DES-CBC3-SHA:DES-CBC3-SHA:DES-CBC3-MD5:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA:AES128-SHA:RC2-CBC-MD5:RC4-SHA:RC4-MD5:RC4-MD5:EDH-RSA-DES-CBC-SHA:EDH-DSS-DES-CBC-SHA:DES-CBC-SHA:DES-CBC-MD5:EXP-EDH-RSA-DES-CBC-SHA:EXP-EDH-DSS-DES-CBC-SHA:EXP-DES-CBC-SHA:EXP-RC2-CBC-MD5:EXP-RC2-CBC-MD5:EXP-RC4-MD5:EXP-RC4-MD5";
         test_params(params);
-        print_result(coroutine.yield());
+        print_cipher_result(coroutine.yield());
 
         print_no_nl("Simulating Messages 7.0.1 (3322) on OS X 10.8... ");
 
-        params = { mode = "client", protocol = "tlsv1", options = {"no_sslv2"} };
+        params.protocol = "tlsv1";
+        params.options = {"no_sslv2"};
         params.ciphers = "ECDHE-ECDSA-AES256-SHA:ECDHE-ECDSA-AES128-SHA:ECDHE-ECDSA-RC4-SHA:ECDHE-ECDSA-DES-CBC3-SHA:ECDHE-RSA-AES256-SHA:ECDHE-RSA-AES128-SHA:ECDHE-RSA-RC4-SHA:ECDHE-RSA-DES-CBC3-SHA:ECDH-ECDSA-AES128-SHA:ECDH-ECDSA-AES256-SHA:ECDH-ECDSA-RC4-SHA:ECDH-ECDSA-DES-CBC3-SHA:ECDH-RSA-AES128-SHA:ECDH-RSA-AES256-SHA:ECDH-RSA-RC4-SHA:ECDH-RSA-DES-CBC3-SHA:AES128-SHA:RC4-SHA:RC4-MD5:AES256-SHA:DES-CBC3-SHA:DHE-RSA-AES128-SHA:DHE-RSA-AES256-SHA:EDH-RSA-DES-CBC3-SHA";
         test_params(params);
-        print_result(coroutine.yield());
+        print_cipher_result(coroutine.yield());
 
         print_no_nl("Simulating Pidgin 2.10.6 on Debian 7.1... ");
 
-        params = { mode = "client", protocol = "tlsv1", options = {"no_sslv2", "no_tlsv1_1", "no_tlsv1_2"} };
+        params.protocol = "tlsv1";
+        params.options = {"no_sslv2", "no_tlsv1_1", "no_tlsv1_2"};
         params.ciphers = "DHE-DSS-AES256-SHA:AES256-SHA:DHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA:RC4-SHA:RC4-MD5:AES128-SHA:EDH-RSA-DES-CBC3-SHA:EDH-DSS-DES-CBC3-SHA:DES-CBC3-SHA:EDH-RSA-DES-CBC-SHA:EDH-DSS-DES-CBC-SHA";
         test_params(params);
-        print_result(coroutine.yield());
+        print_cipher_result(coroutine.yield());
 
         print_no_nl("Simulating Gajim 0.15.1 on Debian 7.1... ");
 
-        params = { mode = "client", protocol = "tlsv1", options = {"no_sslv2"} };
+        params.protocol = "tlsv1";
+        params.options = {"no_sslv2"};
         params.ciphers = "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:SRP-DSS-AES-256-CBC-SHA:SRP-RSA-AES-256-CBC-SHA:DHE-DSS-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-SHA256:DHE-DSS-AES256-SHA256:DHE-RSA-AES256-SHA:DHE-DSS-AES256-SHA:DHE-RSA-CAMELLIA256-SHA:DHE-DSS-CAMELLIA256-SHA:ECDH-RSA-AES256-GCM-SHA384:ECDH-ECDSA-AES256-GCM-SHA384:ECDH-RSA-AES256-SHA384:ECDH-ECDSA-AES256-SHA384:ECDH-RSA-AES256-SHA:ECDH-ECDSA-AES256-SHA:AES256-GCM-SHA384:AES256-SHA256:AES256-SHA:CAMELLIA256-SHA:ECDHE-RSA-DES-CBC3-SHA:ECDHE-ECDSA-DES-CBC3-SHA:SRP-DSS-3DES-EDE-CBC-SHA:SRP-RSA-3DES-EDE-CBC-SHA:EDH-RSA-DES-CBC3-SHA:EDH-DSS-DES-CBC3-SHA:ECDH-RSA-DES-CBC3-SHA:ECDH-ECDSA-DES-CBC3-SHA:DES-CBC3-SHA:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES128-SHA:SRP-DSS-AES-128-CBC-SHA:SRP-RSA-AES-128-CBC-SHA:DHE-DSS-AES128-GCM-SHA256:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES128-SHA256:DHE-DSS-AES128-SHA256:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA:DHE-RSA-SEED-SHA:DHE-DSS-SEED-SHA:DHE-RSA-CAMELLIA128-SHA:DHE-DSS-CAMELLIA128-SHA:ECDH-RSA-AES128-GCM-SHA256:ECDH-ECDSA-AES128-GCM-SHA256:ECDH-RSA-AES128-SHA256:ECDH-ECDSA-AES128-SHA256:ECDH-RSA-AES128-SHA:ECDH-ECDSA-AES128-SHA:AES128-GCM-SHA256:AES128-SHA256:AES128-SHA:SEED-SHA:CAMELLIA128-SHA:ECDHE-RSA-RC4-SHA:ECDHE-ECDSA-RC4-SHA:ECDH-RSA-RC4-SHA:ECDH-ECDSA-RC4-SHA:RC4-SHA:RC4-MD5:EDH-RSA-DES-CBC-SHA:EDH-DSS-DES-CBC-SHA:DES-CBC-SHA:EXP-EDH-RSA-DES-CBC-SHA:EXP-EDH-DSS-DES-CBC-SHA:EXP-DES-CBC-SHA:EXP-RC2-CBC-MD5:EXP-RC4-MD5";
         test_params(params);
-        print_result(coroutine.yield());
+        print_cipher_result(coroutine.yield());
 
         print_no_nl("Simulating Empathy 3.4.2.3 on Debian 7.1... ");
 
-        params = { mode = "client", protocol = "sslv3", options = {"no_sslv2"} };
+        params.protocol = "sslv3";
+        params.options = {"no_sslv2"};
         params.ciphers = "DHE-RSA-AES128-SHA:DHE-RSA-AES128-SHA256:DHE-RSA-CAMELLIA128-SHA:DHE-RSA-AES256-SHA:DHE-RSA-AES256-SHA256:DHE-RSA-CAMELLIA256-SHA:EDH-RSA-DES-CBC3-SHA:DHE-DSS-AES128-SHA:DHE-DSS-AES128-SHA256:DHE-DSS-CAMELLIA128-SHA:DHE-DSS-AES256-SHA:DHE-DSS-AES256-SHA256:DHE-DSS-CAMELLIA256-SHA:EDH-DSS-DES-CBC3-SHA:AES128-SHA:AES128-SHA256:CAMELLIA128-SHA:AES256-SHA:AES256-SHA256:CAMELLIA256-SHA:DES-CBC3-SHA:RC4-SHA:RC4-MD5";
         test_params(params);
-        print_result(coroutine.yield());
+        print_cipher_result(coroutine.yield());
 
         print_no_nl("Simulating Swift 2.0beta1-dev47 on Debian 7.1... ");
 
-        params = { mode = "client", protocol = "tlsv1", options = {"no_sslv2", "no_tlsv1_1", "no_tlsv1_2" } };
+        params.protocol = "tlsv1";
+        params.options = {"no_sslv2", "no_tlsv1_1", "no_tlsv1_2"};
         params.ciphers = "ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:SRP-DSS-AES-256-CBC-SHA:SRP-RSA-AES-256-CBC-SHA:DHE-RSA-AES256-SHA:DHE-DSS-AES256-SHA:DHE-RSA-CAMELLIA256-SHA:DHE-DSS-CAMELLIA256-SHA:ECDH-RSA-AES256-SHA:ECDH-ECDSA-AES256-SHA:AES256-SHA:CAMELLIA256-SHA:ECDHE-RSA-DES-CBC3-SHA:ECDHE-ECDSA-DES-CBC3-SHA:SRP-DSS-3DES-EDE-CBC-SHA:SRP-RSA-3DES-EDE-CBC-SHA:EDH-RSA-DES-CBC3-SHA:EDH-DSS-DES-CBC3-SHA:ECDH-RSA-DES-CBC3-SHA:ECDH-ECDSA-DES-CBC3-SHA:DES-CBC3-SHA:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES128-SHA:SRP-DSS-AES-128-CBC-SHA:SRP-RSA-AES-128-CBC-SHA:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA:DHE-RSA-SEED-SHA:DHE-DSS-SEED-SHA:DHE-RSA-CAMELLIA128-SHA:DHE-DSS-CAMELLIA128-SHA:ECDH-RSA-AES128-SHA:ECDH-ECDSA-AES128-SHA:AES128-SHA:SEED-SHA:CAMELLIA128-SHA:ECDHE-RSA-RC4-SHA:ECDHE-ECDSA-RC4-SHA:ECDH-RSA-RC4-SHA:ECDH-ECDSA-RC4-SHA:RC4-SHA:RC4-MD5:EDH-RSA-DES-CBC-SHA:EDH-DSS-DES-CBC-SHA:DES-CBC-SHA:EXP-EDH-RSA-DES-CBC-SHA:EXP-EDH-DSS-DES-CBC-SHA:EXP-DES-CBC-SHA:EXP-RC2-CBC-MD5:EXP-RC4-MD5";
         test_params(params);
-        print_result(coroutine.yield());
+        print_cipher_result(coroutine.yield());
 
         print_no_nl("Simulating Psi 0.14 on Debian 7.1... ");
 
-        params = { mode = "client", protocol = "tlsv1", options = {"no_sslv2"} };
+        params.protocol = "tlsv1";
+        params.options = {"no_sslv2"};
         params.ciphers = "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:SRP-DSS-AES-256-CBC-SHA:SRP-RSA-AES-256-CBC-SHA:DHE-DSS-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-SHA256:DHE-DSS-AES256-SHA256:DHE-RSA-AES256-SHA:DHE-DSS-AES256-SHA:DHE-RSA-CAMELLIA256-SHA:DHE-DSS-CAMELLIA256-SHA:ECDH-RSA-AES256-GCM-SHA384:ECDH-ECDSA-AES256-GCM-SHA384:ECDH-RSA-AES256-SHA384:ECDH-ECDSA-AES256-SHA384:ECDH-RSA-AES256-SHA:ECDH-ECDSA-AES256-SHA:AES256-GCM-SHA384:AES256-SHA256:AES256-SHA:CAMELLIA256-SHA:ECDHE-RSA-DES-CBC3-SHA:ECDHE-ECDSA-DES-CBC3-SHA:SRP-DSS-3DES-EDE-CBC-SHA:SRP-RSA-3DES-EDE-CBC-SHA:EDH-RSA-DES-CBC3-SHA:EDH-DSS-DES-CBC3-SHA:ECDH-RSA-DES-CBC3-SHA:ECDH-ECDSA-DES-CBC3-SHA:DES-CBC3-SHA:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES128-SHA:SRP-DSS-AES-128-CBC-SHA:SRP-RSA-AES-128-CBC-SHA:DHE-DSS-AES128-GCM-SHA256:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES128-SHA256:DHE-DSS-AES128-SHA256:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA:DHE-RSA-SEED-SHA:DHE-DSS-SEED-SHA:DHE-RSA-CAMELLIA128-SHA:DHE-DSS-CAMELLIA128-SHA:ECDH-RSA-AES128-GCM-SHA256:ECDH-ECDSA-AES128-GCM-SHA256:ECDH-RSA-AES128-SHA256:ECDH-ECDSA-AES128-SHA256:ECDH-RSA-AES128-SHA:ECDH-ECDSA-AES128-SHA:AES128-GCM-SHA256:AES128-SHA256:AES128-SHA:SEED-SHA:CAMELLIA128-SHA:ECDHE-RSA-RC4-SHA:ECDHE-ECDSA-RC4-SHA:ECDH-RSA-RC4-SHA:ECDH-ECDSA-RC4-SHA:RC4-SHA:RC4-MD5:EDH-RSA-DES-CBC-SHA:EDH-DSS-DES-CBC-SHA:DES-CBC-SHA:EXP-EDH-RSA-DES-CBC-SHA:EXP-EDH-DSS-DES-CBC-SHA:EXP-DES-CBC-SHA:EXP-RC2-CBC-MD5:EXP-RC4-MD5";
         test_params(params);
-        print_result(coroutine.yield());
+        print_cipher_result(coroutine.yield());
 
         print_no_nl("Simulating irssi-xmpp 0.52 on Debian 7.1... ");
 
-        params = { mode = "client", protocol = "tlsv1", options = {"no_sslv2"} };
+        params.protocol = "tlsv1";
+        params.options = {"no_sslv2"};
         params.ciphers = "DHE-RSA-AES128-SHA:DHE-RSA-AES128-SHA256:DHE-RSA-CAMELLIA128-SHA:DHE-RSA-AES256-SHA:DHE-RSA-AES256-SHA256:DHE-RSA-CAMELLIA256-SHA:EDH-RSA-DES-CBC3-SHA:DHE-DSS-AES128-SHA:DHE-DSS-AES128-SHA256:DHE-DSS-CAMELLIA128-SHA:DHE-DSS-AES256-SHA:DHE-DSS-AES256-SHA256:DHE-DSS-CAMELLIA256-SHA:EDH-DSS-DES-CBC3-SHA:AES128-SHA:AES128-SHA256:CAMELLIA128-SHA:AES256-SHA:AES256-SHA256:CAMELLIA256-SHA:DES-CBC3-SHA:RC4-SHA:RC4-MD5";
         test_params(params);
-        print_result(coroutine.yield());
-
+        print_cipher_result(coroutine.yield());
     end
 
 
