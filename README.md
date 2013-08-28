@@ -19,7 +19,12 @@ to build xmppoke.lua.
 
 This will initiate a number of c2s connections to example.com, to test the TLS configuration.
 
-There's a couple of configuration variables in `poke.lua` that can be changed:
+Usage:
 
-* `use_html`: if true, writes a html formatted report to `reports/example.com.html`, otherwise it will show the output in the terminal.
-* `sleep_for`: determines the time between consecutive connection attempts.
+`lua xmppoke.lua [-v] [-h] [-o output] [-m (server|client)] [-d=seconds] hostname`
+
+* `-v` verbose.
+* `-h` write a HTML report, instead of ANSI colored output to the terminal.
+* `-o` the directory to store the report.
+* `-m` the mode (either client or server)
+* `-d` the number of seconds to wait between every connection.
