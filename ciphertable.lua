@@ -132,13 +132,30 @@ function M.find(name)
 	end
 end
 
--- 00ffc00ac009c007c008c014c013c011c012c004c005c002c003c00ec00fc00cc00d002f000500040035000a003300390016
-
--- Turns a hex-dump of a TLS client hello message into the list of supported ciphers.
+-- Turns a hex-dump of a TLS client hello message into the list of supported ciphers (2 byte ciphers).
 function M.parse_list_tls(str)
 	local result = "";
 
 	str:gsub("....", function (code)
+		local cipher = ciphers[tonumber("0x" .. code)];
+		if cipher then
+			if #result > 0 then
+				result = result .. ":";
+			end
+			result = result .. cipher;
+		else
+			print("Cipher " .. code .. " not found!");
+		end
+	end);
+
+	return result;
+end
+
+-- Turns a hex-dump of a SSL client hello message into the list of supported ciphers (3 byte ciphers).
+function M.parse_list_ssl(str)
+	local result = "";
+
+	str:gsub("......", function (code)
 		local cipher = ciphers[tonumber("0x" .. code)];
 		if cipher then
 			if #result > 0 then
