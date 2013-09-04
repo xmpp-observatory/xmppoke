@@ -23,7 +23,7 @@ end
 local stream_callbacks = {
 	stream_ns = xmlns_stream,
 	stream_tag = "stream",
-	 default_ns = "jabber:server" };
+	 default_ns = "jabber:client" };
 	
 function stream_callbacks.streamopened(stream, attr)
 	stream.stream_id = attr.id;
@@ -75,7 +75,11 @@ function stream:connect_client(jid, pass)
 	self.jid, self.password = jid, pass;
 	self.username, self.host, self.resource = jid_split(jid);
 	
+	-- Required XMPP features
 	self:add_plugin("tls");
+	self:add_plugin("sasl");
+	self:add_plugin("bind");
+	self:add_plugin("session");
 	
 	function self.data(conn, data)
 		local ok, err = self.stream:feed(data);
@@ -101,7 +105,7 @@ function stream:connect_client(jid, pass)
 	
 	self:hook("stanza", function (stanza)
 		local ret;
-		if stanza.attr.xmlns == nil or stanza.attr.xmlns == "jabber:server" then
+		if stanza.attr.xmlns == nil or stanza.attr.xmlns == "jabber:client" then
 			if stanza.name == "iq" and (stanza.attr.type == "get" or stanza.attr.type == "set") then
 				local xmlns = stanza.tags[1] and stanza.tags[1].attr.xmlns;
 				if xmlns then
@@ -152,7 +156,7 @@ function stream:connect_client(jid, pass)
 	
 	local function start_connect()
 		-- Initialise connection
-		self:connect(to_ascii(self.connect_host or self.host), self.connect_port or 5269);
+		self:connect(to_ascii(self.connect_host or self.host), self.connect_port or 5222);
 	end
 	
 	if not (self.connect_host or self.connect_port) then
@@ -170,7 +174,7 @@ function stream:connect_client(jid, pass)
 				self.srv_choice = 1;
 				if srv_choice then
 					self.connect_host, self.connect_port = srv_choice.target, srv_choice.port;
-					self:debug("Best record found, will connect to %s:%d", self.connect_host or self.host, self.connect_port or 5269);
+					self:debug("Best record found, will connect to %s:%d", self.connect_host or self.host, self.connect_port or 5222);
 				end
 				
 				self:hook("disconnected", function ()
@@ -188,7 +192,7 @@ function stream:connect_client(jid, pass)
 				end, 1000);
 			end
 			start_connect();
-		end, "_xmpp-server._tcp."..(to_ascii(self.host))..".", "SRV");
+		end, "_xmpp-client._tcp."..(to_ascii(self.host))..".", "SRV");
 	else
 		start_connect();
 	end
@@ -197,7 +201,7 @@ end
 function stream:reopen()
 	self:reset();
 	self:send(st.stanza("stream:stream", { to = self.host, ["xmlns:stream"]='http://etherx.jabber.org/streams',
-		xmlns = "jabber:server", version = "1.0", from = "xmppoke.thijsalkema.de", ["xmlns:db"]='jabber:server:dialback' }):top_tag());
+		xmlns = "jabber:client", version = "1.0" }):top_tag());
 end
 
 function stream:send_iq(iq, callback)
