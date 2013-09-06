@@ -2,7 +2,7 @@ local openssl_blacklists = "/usr/share/openssl-blacklist/";
 local cafile = "/opt/local/etc/openssl/cert.pem";
 local capath = nil;
 local key = "certs/server.key";
-local certificate =  "certs/server.crt";
+local certificate = "certs/server.crt";
 
 local short_opts = { v = "verbose", h = "html", o = "output", m = "mode", d = "delay" }
 local opts = { mode = "client", html = false, output = "reports", verbose = false, delay = "2" };
@@ -238,7 +238,7 @@ function test_cert()
                     modulus_hash = modulus_hash .. string.format("%02x", modulus_hash_raw:byte(i, i+1));
                 end
 
-                local blacklist = io.open(openssl_blacklists .. "/blacklist.RSA-" .. bits);
+                local blacklist = openssl_blacklists and io.open(openssl_blacklists .. "/blacklist.RSA-" .. bits) or nil;
 
                 if blacklist then
                     local found = false;
