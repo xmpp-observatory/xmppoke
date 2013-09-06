@@ -1,3 +1,9 @@
+local openssl_blacklists = "/usr/share/openssl-blacklist/";
+local cafile = "/opt/local/etc/openssl/cert.pem";
+local capath = nil;
+local key = "certs/server.key";
+local certificate =  "certs/server.crt";
+
 local short_opts = { v = "verbose", h = "html", o = "output", m = "mode", d = "delay" }
 local opts = { mode = "client", html = false, output = "reports", verbose = false, delay = "2" };
 
@@ -28,6 +34,7 @@ local os = require("os");
 local ciphertable = require("ciphertable");
 
 local cert_verify_identity = require "util.x509".verify_identity;
+local sha1 = require "util.hashes".sha1;
 
 local boldred, red, boldgreen, green, boldblue, reset;
 
@@ -133,9 +140,10 @@ end
 default_params = { mode = "client",
                   verify = {"peer","fail_if_no_peer_cert"},
                   verifyext = {"lsec_continue", "crl_check_chain"},
-                  cafile = "/opt/local/etc/openssl/cert.pem",
-                  key = "certs/server.key",
-                  certificate = "certs/server.crt",
+                  cafile = cafile,
+                  capath = capath,
+                  key = key,
+                  certificate = certificate,
                   };
 
 function test_cert()
@@ -221,6 +229,38 @@ function test_cert()
 
                 print("Fingerprint (SHA1): "..pretty_fingerprint(cert:digest("sha1")));
 
+                local bits = cert:bits();
+
+                local modulus_hash_raw = sha1("Modulus="..cert:modulus().."\n");
+                local modulus_hash = "";
+
+                for i=1,#modulus_hash_raw do
+                    modulus_hash = modulus_hash .. string.format("%02x", modulus_hash_raw:byte(i, i+1));
+                end
+
+                local blacklist = io.open(openssl_blacklists .. "/blacklist.RSA-" .. bits);
+
+                if blacklist then
+                    local found = false;
+
+                    while true do
+                        local line = blacklist:read("*l");
+
+                        if not line then break; end
+
+                        if line == modulus_hash:sub(20) then
+                            found = true;
+                            break
+                        end
+                    end
+
+                    if found then
+                        print(boldred .. "Uses a weak Debian key! See https://wiki.debian.org/SSLkeys" .. reset);
+                    end
+                else
+                    print("Can not determine wether a key with bit size " .. bits .. " is a weak Debian key.");
+                end
+
                 local judgement = "";
                 local signature_alg = cert:signature_alg();
 
@@ -232,7 +272,7 @@ function test_cert()
 
                 print("Signature algorithm: " .. cert:signature_alg() .. judgement);
 
-                print("Key size: " .. cert:bits() .. " bits");
+                print("Key size: " .. bits .. " bits");
 
                 print("");
 
