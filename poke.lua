@@ -258,7 +258,7 @@ function test_cert()
                         print(boldred .. "Uses a weak Debian key! See https://wiki.debian.org/SSLkeys" .. reset);
                     end
                 else
-                    print("Can not determine wether a key with bit size " .. bits .. " is a weak Debian key.");
+                    print("Can not determine whether a key with bit size " .. bits .. " is a weak Debian key.");
                 end
 
                 local judgement = "";
