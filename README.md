@@ -5,7 +5,7 @@ XMPPoke - Testing the encryption strength of XMPP servers
 Required:
 
 * luasec from the xmppoke branch of [https://github.com/xnyhps/luasec/tree/xmppoke](https://github.com/xnyhps/luasec/tree/xmppoke)
-* Copy encodings.so and hashes.so from a `util` in a [https://prosody.im](Prosody) build to `util/` in xmppoke.
+* Copy encodings.so and hashes.so from `util` in a [Prosody](https://prosody.im) build to `util/` in xmppoke.
 
 Then:
 
