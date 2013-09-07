@@ -121,6 +121,7 @@ ciphers[0xC001] = "ECDH-ECDSA-NULL-SHA";
 ciphers[0x003B] = "NULL-SHA256";
 ciphers[0x0002] = "NULL-SHA";
 ciphers[0x0001] = "NULL-MD5";
+ciphers[0x0066] = "DHE-DSS-RC4-SHA";
 
 M.ciphers = ciphers;
 
