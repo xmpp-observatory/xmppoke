@@ -6,7 +6,7 @@ local adns = require "net.adns";
 local lxp = require "lxp";
 local st = require "util.stanza";
 
-local to_ascii = require "encodings".idna.to_ascii;
+local to_ascii = require "util.encodings".idna.to_ascii;
 
 -- Shortcuts to save having to load util.stanza
 verse.message, verse.presence, verse.iq, verse.stanza, verse.reply, verse.error_reply =
