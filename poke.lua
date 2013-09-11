@@ -22,7 +22,7 @@ local sleep_for = tonumber(opts.delay);
 local mode = opts.mode;
 
 if not host or (mode ~= "server" and mode ~= "client") then
-    print(string.format("Usage: %s [-v] [-h] [-o output] [-m (server|client)] [-d=seconds] hostname", arg[0]));
+    print(string.format("Usage: %s [-v] [-h] [--out=reports/] [--mode=(server|client)] [--delay=seconds] hostname", arg[0]));
     os.exit();
 end
 
