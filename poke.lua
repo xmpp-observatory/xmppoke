@@ -191,7 +191,7 @@ function test_cert()
             print("Certificate details:");
             
             local chain_valid, errors = conn:getpeerverification();
-            local valid_identity = cert_verify_identity(host, "xmpp-server", cert);
+            local valid_identity = cert_verify_identity(host, "xmpp-"..mode, cert);
             print("Valid for "..host..": "..(valid_identity and "Yes" or boldred .. "No" .. reset));
 
             local chain_valid, errors = conn:getpeerverification();
