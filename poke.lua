@@ -270,7 +270,7 @@ function test_cert()
 
                 print("");
 
-                print("Signature algorithm: " .. cert:signature_alg() .. judgement);
+                print("Signature algorithm: " .. signature_alg .. judgement);
 
                 print("Key size: " .. bits .. " bits");
 
