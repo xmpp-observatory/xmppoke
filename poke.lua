@@ -58,6 +58,7 @@ if use_html then
     report = io.open(opts.output .. "/" .. mode .. "-" .. host .. ".html", "w");
     report:write("<html>");
     report:write("<head>");
+    report:write("<meta http-equiv='Content-Type' content='text/html; charset=UTF-8' />");
     report:write("<title>XMPP TLS report for " .. host .. "</title>");
     report:write("</head>");
     report:write("");
