@@ -1,8 +1,8 @@
 local openssl_blacklists = "/usr/share/openssl-blacklist/";
-local cafile = "/opt/local/etc/openssl/cert.pem";
-local capath = nil;
-local key = "certs/server.key";
-local certificate = "certs/server.crt";
+--local cafile = "/opt/local/etc/openssl/cert.pem";
+local capath = "/etc/ssl/certs";
+--local key = "certs/server.key";
+--local certificate = "certs/server.crt";
 
 local short_opts = { v = "verbose", h = "html", o = "output", m = "mode", d = "delay" }
 local opts = { mode = "client", html = false, output = "reports", verbose = false, delay = "2" };
@@ -28,6 +28,7 @@ end
 
 local jid = host;
 
+local date = require("3rdparty/date")
 local ssl = require("ssl");
 local io = require("io");
 local os = require("os");
@@ -279,6 +280,13 @@ function test_cert()
 
                 print("Valid from: " .. cert:notbefore());
                 print("Valid to: " .. cert:notafter());
+
+                local now = date()
+                if now < date(cert:notbefore()) then
+                    print(red .. "Certificate is not yet valid" .. reset);
+                elseif now > date(cert:notafter()) then
+                    print(red .. "Certificate is expired" .. reset);
+                end
 
                 local crl_url = cert:crl();
                 local ocsp_url = cert:ocsp();
