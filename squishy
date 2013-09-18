@@ -40,5 +40,7 @@ for _, plugin in ipairs(plugins) do
 	Module("verse.plugins."..plugin)("plugins/"..plugin..".lua")
 end
 
+Module "3rdparty.date" "3rdparty/date.lua"
+
 -- Main verse file
 Main "poke.lua"

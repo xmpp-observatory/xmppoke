@@ -277,14 +277,18 @@ function test_cert()
 
                 print("");
 
-                print("Valid from: " .. cert:notbefore());
-                print("Valid to: " .. cert:notafter());
+                local notbefore = date(cert:notbefore());
+                local notafter = date(cert:notafter());
+                local now = date();
 
-                local now = date()
-                if now < date(cert:notbefore()) then
-                    print(red .. "Certificate is not yet valid" .. reset);
-                elseif now > date(cert:notafter()) then
-                    print(red .. "Certificate is expired" .. reset);
+                print("Valid from: " .. notbefore:fmt("%F %T GMT") .. " (" .. (now - notbefore):fuzzy_range() .. ")");
+                print("Valid to: " .. notafter:fmt("%F %T GMT") .. " (" .. (now - notafter):fuzzy_range() .. ")");
+
+                if now < notbefore then
+                    print(boldred .. "Certificate is not yet valid." .. reset);
+                end
+                if now > notafter then
+                    print(boldred .. "Certificate is expired." .. reset);
                 end
 
                 local crl_url = cert:crl();

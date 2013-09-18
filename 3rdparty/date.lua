@@ -721,6 +721,42 @@
 
 	function date.isodate(y,w,d) return date_new(makedaynum_isoywd(y + 0, w and (w+0) or 1, d and (d+0) or 1), 0)	end
 
+	function dobj:fuzzy_range()
+		local y = self:getyear();
+		if y < 0 then y = -y end
+
+		local parts = {};
+		if y > 0 then parts[#parts + 1] = tostring(y) .. " year" .. (y > 1 and "s" or "") end
+		local m = self:getmonth();
+		if m > 0 then parts[#parts + 1] = tostring(m) .. " month" .. (m > 1 and "s" or "") end
+		local d = self:getday();
+		if d > 0 then parts[#parts + 1] = tostring(d) .. " day" .. (d > 1 and "s" or "") end
+		local h = self:gethours();
+		if h > 0 then parts[#parts + 1] = tostring(h) .. " hour" .. (h > 1 and "s" or "") end
+		local min = self:getminutes();
+		if min > 0 then parts[#parts + 1] = tostring(min) .. " minute" .. (min > 1 and "s" or "") end
+		
+		local str = "";
+
+		if #parts == 0 then
+			return "now";
+		elseif #parts == 1 then
+			str = parts[1];
+		elseif #parts == 2 then
+			str = parts[1] .. " and " .. parts[2];
+		else
+			str = parts[1] .. ", " .. parts[2] .. " and " .. parts[3];
+		end
+
+		if self:getyear() <= 0 then
+			str = str .. " from now";
+		else
+			str = str .. " ago";
+		end
+
+		return str;
+	end
+
 -- Internal functions
 	function date.fmt(str) if str then fmtstr = str end; return fmtstr end
 	function date.daynummin(n)	DAYNUM_MIN = (n and n < DAYNUM_MAX) and n or DAYNUM_MIN	return n and DAYNUM_MIN or date_new(DAYNUM_MIN, 0):normalize()end
