@@ -1,11 +1,5 @@
-local openssl_blacklists = "/usr/share/openssl-blacklist/";
---local cafile = "/opt/local/etc/openssl/cert.pem";
-local capath = "/etc/ssl/certs";
---local key = "certs/server.key";
---local certificate = "certs/server.crt";
-
 local short_opts = { v = "verbose", h = "html", o = "output", m = "mode", d = "delay" }
-local opts = { mode = "client", html = false, output = "reports", verbose = false, delay = "2" };
+local opts = { mode = "client", html = false, output = "reports", verbose = false, delay = "2", capath = "/etc/ssl/certs", cafile = nil, key = nil, certificate = nil, blacklist = "/usr/share/openssl-blacklist/" };
 
 for _, opt in ipairs(arg) do
     if opt:match("^%-") then
@@ -20,9 +14,14 @@ end
 local use_html = opts.html;
 local sleep_for = tonumber(opts.delay);
 local mode = opts.mode;
+local cafile = opts.cafile;
+local capath = opts.capath;
+local key = opts.key;
+local certificate = opts.certificate;
+local openssl_blacklists = opts.blacklist;
 
 if not host or (mode ~= "server" and mode ~= "client") then
-    print(string.format("Usage: %s [-v] [-h] [--out=reports/] [--mode=(server|client)] [--delay=seconds] hostname", arg[0]));
+    print(string.format("Usage: %s [-v] [-h] [--out=reports/] [--mode=(server|client)] [--delay=seconds] [--capath=path] [--cafile=file] [--key=privatekey] [--certificate=certificate] [--blacklist=path] hostname", arg[0]));
     os.exit();
 end
 
