@@ -298,11 +298,7 @@ function test_cert()
 
                     print("TLSA records:");
 
-                    local _, err = pcall(function()
                     local f = adns.lookup(function (a) coroutine.resume(dnsco, a) end, tlsa, "TLSA");
-
-                    print(f);
-                    end); print(err);
 
                     tlsa_answer = coroutine.yield();
 
