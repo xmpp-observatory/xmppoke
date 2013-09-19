@@ -64,6 +64,7 @@ if use_html then
     report:write("</head>");
     report:write("");
     report:write("<body>");
+    report:write("<h2>XMPP " .. mode .. "-to-server TLS report for " .. host .. "</h2><b>Date: " .. date() .. "</b><hr />");
     report:write("<pre>");
 end
 
