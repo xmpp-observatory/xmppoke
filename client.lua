@@ -163,6 +163,7 @@ function stream:connect_client(jid, pass)
 		-- Look up SRV records
 		adns.lookup(function (answer)
 			if answer then
+				self.srv_answer = answer;
 				local srv_hosts = {};
 				self.srv_hosts = srv_hosts;
 				for _, record in ipairs(answer) do
@@ -185,10 +186,6 @@ function stream:connect_client(jid, pass)
 						start_connect();
 						return true;
 					end
-				end, 1000);
-				
-				self:hook("connected", function ()
-					self.srv_hosts = nil;
 				end, 1000);
 			end
 			start_connect();

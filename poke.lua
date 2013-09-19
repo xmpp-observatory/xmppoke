@@ -32,6 +32,7 @@ local ssl = require("ssl");
 local io = require("io");
 local os = require("os");
 local ciphertable = require("ciphertable");
+local adns = require("net.adns");
 
 local cert_verify_identity = require "util.x509".verify_identity;
 local sha1 = require "util.hashes".sha1;
@@ -129,6 +130,103 @@ local function print_errors(print, errors)
     end
 end
 
+local function deep_equal(a, b)
+    if type(a) ~= type(b) then
+        return false;
+    end
+    if type(a) == "table" then
+        for k,_ in pairs(a) do
+            if not deep_equal(a[k], b[k]) then
+                return false;
+            end
+        end
+        for k,_ in pairs(b) do
+            if not deep_equal(a[k], b[k]) then
+                return false;
+            end
+        end
+        return true;
+    end
+    return a == b;
+end
+
+local function pretty_cert(current_cert)
+    print("Subject:");
+    print_subject(print, current_cert:subject());
+
+    print("");
+
+    print("Fingerprint (SHA1): "..pretty_fingerprint(current_cert:digest("sha1")));
+    print("Fingerprint (SHA256): "..pretty_fingerprint(current_cert:digest("sha256")));
+    print("Fingerprint (SHA512): "..pretty_fingerprint(current_cert:digest("sha512")));
+
+    local bits = current_cert:bits();
+
+    local modulus_hash_raw = sha1("Modulus="..current_cert:modulus().."\n");
+    local modulus_hash = "";
+
+    for j=1,#modulus_hash_raw do
+        modulus_hash = modulus_hash .. string.format("%02x", modulus_hash_raw:byte(j, j+1));
+    end
+
+    local blacklist = openssl_blacklists and io.open(openssl_blacklists .. "/blacklist.RSA-" .. bits) or nil;
+
+    if blacklist then
+        local found = false;
+
+        while true do
+            local line = blacklist:read("*l");
+
+            if not line then break; end
+
+            if line == modulus_hash:sub(20) then
+                found = true;
+                break
+            end
+        end
+
+        if found then
+            print(boldred .. "Uses a weak Debian key! See https://wiki.debian.org/SSLkeys" .. reset);
+        end
+    else
+        print("Can not determine whether a key with bit size " .. bits .. " is a weak Debian key.");
+    end
+
+    local judgement = "";
+    local signature_alg = current_cert:signature_alg();
+
+    if signature_alg == "md5WithRSAEncryption" then
+        judgement = boldred .. " INSECURE!" .. reset;
+    end
+
+    print("");
+
+    print("Signature algorithm: " .. signature_alg .. judgement);
+
+    print("Key size: " .. bits .. " bits");
+
+    print("");
+
+    local notbefore = date(current_cert:notbefore());
+    local notafter = date(current_cert:notafter());
+    local now = date();
+
+    print("Valid from: " .. notbefore:fmt("%F %T GMT") .. " (" .. date.fuzzy_range(now, notbefore) .. ")");
+    print("Valid to: " .. notafter:fmt("%F %T GMT") .. " (" .. date.fuzzy_range(now, notafter) .. ")");
+
+    if now < notbefore then
+        print(boldred .. "Certificate is not yet valid." .. reset);
+    end
+    if now > notafter then
+        print(boldred .. "Certificate is expired." .. reset);
+    end
+
+    local crl_url = current_cert:crl();
+    local ocsp_url = current_cert:ocsp();
+
+    print("Revocation:" .. (crl_url and  " CRL: " .. crl_url or "") .. (ocsp_url and  " OCSP: " .. ocsp_url or ""));
+end
+
 local function keysize_score(bits)
     if bits == 0 then return 0; end
     if bits < 512 then return 20; end
@@ -172,190 +270,222 @@ function test_cert()
 
     c:hook("status", function (status)
         if status == "ssl-handshake-complete" and not done then
-
-            local conn = c.conn:socket();
-
-            if not conn.getpeercertificate then
-                line();
-
-                print(boldred .. "No TLS support detected!" .. reset);
-
-                line();
-                finish();
-                os.exit();
-            end
-
-            local cert = conn:getpeercertificate();
-
-            line();
-
-            print("Certificate details:");
-            
-            local chain_valid, errors = conn:getpeerverification();
-            local valid_identity = cert_verify_identity(host, "xmpp-"..mode, cert);
-            print("Valid for "..host..": "..(valid_identity and "Yes" or boldred .. "No" .. reset));
-
-            local chain_valid, errors = conn:getpeerverification();
-
-            if chain_valid then
-                print("Trusted certificate: Yes");
-            else
-                print("Trusted certificate: " .. red .. "No" .. reset);
-                print_errors(print, errors);
-                fail_untrusted = true;
-            end
-
-            if not valid_identity then
-                fail_untrusted = true;
-            end
-
-            line();
-            print("Certificate chain:");
-
-            local i = 1;
-
-            while true do
-                local cert = conn:getpeercertificate(i);
-
-                if not cert then break end;
+            local dnsco = coroutine.create(function (dnsco)
 
                 line();
 
-                print(i-1 .. ":");
+                print("DNS details:");
 
-                print("Subject:");
-                print_subject(print, cert:subject());
-
-                print("");
-
-                print("Fingerprint (SHA1): "..pretty_fingerprint(cert:digest("sha1")));
-
-                local bits = cert:bits();
-
-                local modulus_hash_raw = sha1("Modulus="..cert:modulus().."\n");
-                local modulus_hash = "";
-
-                for i=1,#modulus_hash_raw do
-                    modulus_hash = modulus_hash .. string.format("%02x", modulus_hash_raw:byte(i, i+1));
+                print("SRV records:")
+                for k,v in ipairs(c.srv_hosts) do
+                    print((c.srv_choice == k and "* " or "  ") .. v.priority .. " " .. v.weight .. " " .. v.port .. " " .. v.target);
                 end
 
-                local blacklist = openssl_blacklists and io.open(openssl_blacklists .. "/blacklist.RSA-" .. bits) or nil;
+                if c.srv_answer.secure then
+                    print("SRV records verified using " .. green .. "DNSSEC" .. reset .. ".");
+                elseif c.srv_answer.bogus then
+                    print("SRV records failed " .. red .. "DNSSEC" .. reset .. " validation.");
+                end
 
-                if blacklist then
-                    local found = false;
+                line();
 
-                    while true do
-                        local line = blacklist:read("*l");
+                local srv = c.srv_hosts[c.srv_choice];
+                local tlsa = "_" .. srv.port .. "._tcp." .. srv.target;
+                local tlsa_supported = (not require("net.dns").types) or (require("net.dns").types[52] == "TLSA");
+                local tlsa_answer = nil;
 
-                        if not line then break; end
+                if tlsa_supported then
 
-                        if line == modulus_hash:sub(20) then
-                            found = true;
-                            break
-                        end
-                    end
+                    print("TLSA records:");
 
-                    if found then
-                        print(boldred .. "Uses a weak Debian key! See https://wiki.debian.org/SSLkeys" .. reset);
+                    local _, err = pcall(function()
+                    local f = adns.lookup(function (a) coroutine.resume(dnsco, a) end, tlsa, "TLSA");
+
+                    print(f);
+                    end); print(err);
+
+                    tlsa_answer = coroutine.yield();
+
+                    if tlsa_answer.secure then
+                        print(green .. "DNSSEC secured" .. reset .. " TLSA records for " .. tlsa .. ":\n" .. tostring(tlsa_answer));
+                    elseif tlsa_answer.bogus then
+                        print(red .. "bogus" .. reset " TLSA records for " .. tlsa .. ":\n" .. tostring(tlsa_answer));
                     end
                 else
-                    print("Can not determine whether a key with bit size " .. bits .. " is a weak Debian key.");
+                    print("No luaunbound support detected. Skipping TLSA records.");
                 end
 
-                local judgement = "";
-                local signature_alg = cert:signature_alg();
+                local conn = c.conn:socket();
 
-                if signature_alg == "md5WithRSAEncryption" then
-                    judgement = boldred .. " INSECURE!" .. reset;
+                if not conn.getpeercertificate then
+                    line();
+
+                    print(boldred .. "No TLS support detected!" .. reset);
+
+                    line();
+                    finish();
+                    os.exit();
                 end
 
-                print("");
+                line();
 
-                print("Signature algorithm: " .. signature_alg .. judgement);
+                local cert = conn:getpeercertificate();
+                local chain_valid, errors = conn:getpeerverification();
 
-                print("Key size: " .. bits .. " bits");
+                if tlsa_supported then
 
-                print("");
+                    print("TLSA verification results:");        
 
-                local notbefore = date(cert:notbefore());
-                local notafter = date(cert:notafter());
-                local now = date();
+                    local tohex = function(c) return string.format("%02x", string.byte(c)); end
 
-                print("Valid from: " .. notbefore:fmt("%F %T GMT") .. " (" .. (now - notbefore):fuzzy_range() .. ")");
-                print("Valid to: " .. notafter:fmt("%F %T GMT") .. " (" .. (now - notafter):fuzzy_range() .. ")");
+                    local matches = { [0] = function (c) return string.gsub(c:der(), ".", tohex) end, function (c) return c:digest("sha256") end, function (c) return c:digest("sha512") end }
 
-                if now < notbefore then
-                    print(boldred .. "Certificate is not yet valid." .. reset);
-                end
-                if now > notafter then
-                    print(boldred .. "Certificate is expired." .. reset);
-                end
+                    for k,v in ipairs(tlsa_answer) do
+                        v.tlsa.found = false;
+                        if v.tlsa.use == 1 or v.tlsa.use == 3 then
+                            if v.tlsa.select == 0 then
+                                if matches[v.tlsa.match] and (matches[v.tlsa.match](cert) == string.gsub(v.tlsa.data, ".", tohex)) then
+                                    v.tlsa.found = v.tlsa.use == 3 or chain_valid;
+                                end
+                            end
+                        elseif v.tlsa.use == 0 or v.tlsa.use == 2 then
+                            local i = 2;
 
-                local crl_url = cert:crl();
-                local ocsp_url = cert:ocsp();
+                            while true do
+                                local cert = conn:getpeercertificate(i);
 
-                print("Revocation:" .. (crl_url and  " CRL: " .. crl_url or "") .. (ocsp_url and  " OCSP: " .. ocsp_url or ""));
+                                if not cert then break end;
 
-                i = i + 1;
-            end
+                                if matches[v.tlsa.match] and (matches[v.tlsa.match](cert) == string.gsub(v.tlsa.data, ".", tohex)) then
+                                    v.tlsa.found = v.tlsa.use == 2 or chain_valid;
+                                end
 
-            line();
-
-            local last_cert = conn:getpeercertificate(i - 1);
-
-            local function deep_equal(a, b)
-                if type(a) ~= type(b) then
-                    return false;
-                end
-                if type(a) == "table" then
-                    for k,_ in pairs(a) do
-                        if not deep_equal(a[k], b[k]) then
-                            return false;
+                                i = i + 1;
+                            end
                         end
                     end
-                    for k,_ in pairs(b) do
-                        if not deep_equal(a[k], b[k]) then
-                            return false;
+
+                    for k,v in ipairs(tlsa_answer) do
+                        print_no_nl((v.tlsa.found and (green .. "Success") or (red .. "Fail")) .. reset .. ": ");
+                        print_no_nl(v.tlsa:getUsage() .. " " .. v.tlsa:getSelector() .. " " .. v.tlsa:getMatchType() .. " (");
+                        print(((v.tlsa.match == 1 or v.tlsa.match == 2) and pretty_fingerprint(string.gsub(v.tlsa.data, ".", tohex)) or (string.gsub(v.tlsa.data, ".", tohex):sub(1, 32) .. "...")) .. ").");
+                    end
+
+                    line();
+                end
+
+                print("Certificate details:");
+                
+                local chain_valid, errors = conn:getpeerverification();
+                local valid_identity = cert_verify_identity(host, "xmpp-"..mode, cert);
+                print("Valid for "..host..": "..(valid_identity and "Yes" or boldred .. "No" .. reset));
+
+                if chain_valid then
+                    print("Trusted certificate: Yes");
+                else
+                    print("Trusted certificate: " .. red .. "No" .. reset);
+                    print_errors(print, errors);
+                    fail_untrusted = true;
+                end
+
+                if not valid_identity then
+                    fail_untrusted = true;
+                end
+
+                line();
+                print("Certificate chain:");
+
+                local certs = conn:getpeerchain();
+                local current_cert = cert;
+                local used_certs = {};
+
+                local i = 1;
+
+                while true do
+
+                    used_certs[i] = true;
+
+                    line();
+
+                    print(i-1 .. ":");
+
+                    pretty_cert(current_cert);
+
+                    local new_cert = nil;
+                    i = nil;
+
+                    for k,v in ipairs(certs) do
+                        local res, err = conn:did_issue(v, current_cert);
+                        if res > 0 then
+                            new_cert = v;
+                            i = k;
+                            break;
                         end
                     end
-                    return true;
+
+                    if new_cert == nil then break end;
+
+                    if new_cert == current_cert then
+                        print("Self signed certificate.");
+                        break;
+                    end
+
+                    if used_certs[i] then
+                        print(red .. "Certificate chain contains a cycle." .. reset);
+                        break;
+                    end
+
+                    current_cert = new_cert;
                 end
-                return a == b;
-            end
 
-            -- Hack: if the subject is identical, we assume the server sent its root CA too.
-            if deep_equal(last_cert:issuer(), last_cert:subject()) then
-                print(red .. "Root CA certificate was included in chain." .. reset);
-            else
-                print("Root CA: ");
-                print_subject(print, last_cert:issuer());
-            end
+                line();
 
-            local certificate_score = 0;
+                for k,v in ipairs(certs) do
+                    if not used_certs[k] then
+                        print(red .. "Found unused certificate in chain:" .. reset);
+                        print(k-1 .. ":");
 
-            if chain_valid and valid_identity then
-                certificate_score = 100;
-            end
+                        pretty_cert(v);
 
-            line();
+                        line();
+                    end
+                end
 
-            print(green .. "Certificate score: " .. certificate_score .. reset);
-            print(green .. "Key exchange score: " .. keysize_score(cert:bits()) .. reset);
+                -- Hack: if the subject is identical, we assume the server sent its root CA too.
+                if deep_equal(current_cert:issuer(), current_cert:subject()) then
+                    print(red .. "Root CA certificate was included in chain." .. reset);
+                else
+                    print("Root CA: ");
+                    print_subject(print, current_cert:issuer());
+                end
 
-            total_score = total_score + 0.3 * keysize_score(cert:bits());
+                local certificate_score = 0;
 
-            line();
-            print("Compression: " .. (conn:info("compression") or "none"));
-            line();
+                if chain_valid and valid_identity then
+                    certificate_score = 100;
+                end
 
-            done = true;
+                line();
 
-            c:debug("Closing stream");
-            c.conn:socket():close();
-            
-            verse.add_task(sleep_for, function ()
-                coroutine.resume(co);
+                print(green .. "Certificate score: " .. certificate_score .. reset);
+                print(green .. "Key exchange score: " .. keysize_score(cert:bits()) .. reset);
+
+                total_score = total_score + 0.3 * keysize_score(cert:bits());
+
+                line();
+                print("Compression: " .. (conn:info("compression") or "none"));
+                line();
+
+                done = true;
+
+                c:debug("Closing stream");
+                c.conn:socket():close();
+                
+                verse.add_task(sleep_for, function ()
+                    coroutine.resume(co);
+                end);
             end);
+            coroutine.resume(dnsco, dnsco);
         end
         return false;
     end, 1000);
@@ -595,16 +725,16 @@ co = coroutine.create(function ()
         params.protocol = protocol;
         params.ciphers = cipher1.cipher .. ":" .. cipher2.cipher;
         test_params(params);
-        local result1 = coroutine.yield();
+        local result1, err1 = coroutine.yield();
 
         local params = deepcopy(default_params);
         params.protocol = protocol;
         params.ciphers = cipher2.cipher .. ":" .. cipher1.cipher;
         test_params(params);
-        local result2 = coroutine.yield();
+        local result2, err2 = coroutine.yield();
 
         if not result1 or not result2 then
-            print(red .. "Problem with testing server's ordering." .. reset);
+            print(red .. "Problem with testing server's ordering. " .. tostring(err1) .. " " .. tostring(err2) .. reset);
         elseif result1.cipher == result2.cipher then
             print("Server does " .. red .. "not" .. reset .. " respect client's cipher ordering. Server's order:");
             should_sort = false;

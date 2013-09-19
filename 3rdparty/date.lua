@@ -722,20 +722,19 @@
 
 	function date.isodate(y,w,d) return date_new(makedaynum_isoywd(y + 0, w and (w+0) or 1, d and (d+0) or 1), 0)	end
 
-	function dobj:fuzzy_range()
-		local y = self:getyear();
-		if y < 0 then y = -y end
+	function date.fuzzy_range(a, b)
+		local ago = a > b;
+		local diff = math.abs(a.daynum - b.daynum);
 
 		local parts = {};
-		if y > 0 then parts[#parts + 1] = tostring(y) .. " year" .. (y > 1 and "s" or "") end
-		local m = self:getmonth();
+		local y = math.floor(diff / 365);
+		diff = diff - y * 365;
+		if y > 0 then parts[#parts + 1] = tostring(y) .. " year" .. (y > 2 and "s" or "") end
+		local m = math.floor(diff / (365/12));
+		diff = diff - m * (365/12);
 		if m > 0 then parts[#parts + 1] = tostring(m) .. " month" .. (m > 1 and "s" or "") end
-		local d = self:getday();
+		local d = math.floor(diff);
 		if d > 0 then parts[#parts + 1] = tostring(d) .. " day" .. (d > 1 and "s" or "") end
-		local h = self:gethours();
-		if h > 0 then parts[#parts + 1] = tostring(h) .. " hour" .. (h > 1 and "s" or "") end
-		local min = self:getminutes();
-		if min > 0 then parts[#parts + 1] = tostring(min) .. " minute" .. (min > 1 and "s" or "") end
 		
 		local str = "";
 
@@ -749,7 +748,7 @@
 			str = parts[1] .. ", " .. parts[2] .. " and " .. parts[3];
 		end
 
-		if self:getyear() <= 0 then
+		if not ago then
 			str = str .. " from now";
 		else
 			str = str .. " ago";
