@@ -20,6 +20,11 @@ function tohex(c)
     return string.format("%02x", string.byte(c));
 end
 
+function hex(c)
+    local h = string.gsub(c, ".", tohex);
+    return h;
+end
+
 function print_errors(print, errors)
     if type(errors) == "string" then
         print("    0: " .. errors);
@@ -32,7 +37,7 @@ end
 
 function debian_weak_key(cert)
     local bits = cert:bits();
-    local modulus_hash = sha1("Modulus="..cert:modulus().."\n"):gsub(".", tohex);
+    local modulus_hash = hex(sha1("Modulus="..cert:modulus().."\n"));
 
     local blacklist = openssl_blacklists and io.open(openssl_blacklists .. "/blacklist.RSA-" .. bits) or nil;
 
@@ -61,7 +66,7 @@ function pretty_cert(outputmanager, current_cert)
 
     outputmanager.print("");
 
-    outputmanager.print("SubjectPublicKeyInfo: "..current_cert:spki():gsub(".", tohex));
+    outputmanager.print("SubjectPublicKeyInfo: "..hex(current_cert:spki()));
 
     outputmanager.print("Fingerprint (SHA1): "..pretty_fingerprint(current_cert:digest("sha1")));
     outputmanager.print("Fingerprint (SHA256): "..pretty_fingerprint(current_cert:digest("sha256")));
@@ -119,5 +124,6 @@ return function(blacklist)
         print_errors = print_errors;
         pretty_cert = pretty_cert;
         tohex = tohex;
+        hex = hex;
     }
 end

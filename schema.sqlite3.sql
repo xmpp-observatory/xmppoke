@@ -1,3 +1,4 @@
+
 CREATE TABLE test_results
 ( test_id INTEGER PRIMARY KEY ASC
 , server_name TEXT
@@ -27,6 +28,7 @@ CREATE TABLE srv_results
 , protocol_score INTEGER
 , total_score REAL
 , grade TEXT
+, done BOOLEAN
 );
 
 CREATE TABLE certificates

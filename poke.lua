@@ -39,28 +39,73 @@ local ciphertable = require("ciphertable");
 local adns = require("net.adns");
 local outputmanager = require("output")(use_html and "html" or "ansi");
 local certmanager = require("certs")(openssl_blacklists);
-local dbi = require('DBI');
+local dbi = pcall(function () return require('DBI') end);
 local cert_verify_identity = require "util.x509".verify_identity;
 local verse = require("verse").init(mode);
 local to_ascii = require "util.encodings".idna.to_ascii;
 local sha512 = require("util.hashes").sha512;
 local sha256 = require("util.hashes").sha256;
 
+local driver_name = nil;
+
 outputmanager.init(opts.output, mode, host);
 
-local dbh = assert(dbi.Connect("SQLite3", "results.db", nil, nil, nil, nil));
+local dbh;
+
+if dbi and driver_name == "SQLite3" then
+    dbh = assert(dbi.Connect(driver_name, "results.db", nil, nil, nil, nil));
+
+    last_insert_rowid = assert(dbh:prepare("SELECT last_insert_rowid() AS li"));
+
+elseif dbi and driver_name == "PostgreSQL" then
+    dbh = assert(dbi.Connect(driver_name, "xmppoke", "xmppoke", "xmppoke", "localhost", 5432));
+else
+    local noop = function () end
+    dbh = { execute = function () return {}; end
+          , autocommit = noop
+          , commit = noop
+          , close = noop
+          , prepare = function () return { execute = function () return {}; end, fetch = function () return nil; end }; end
+          }
+end
 
 dbh:autocommit(false);
 
-local sth = assert(dbh:prepare("INSERT INTO test_results (server_name, test_date, type) VALUES (?, DATETIME('now'), ?)"));
-local last_insert_rowid = assert(dbh:prepare("SELECT last_insert_rowid() AS li;"));
+local function execute_and_get_id(q, ...)
+    if driver_name == "PostgreSQL" then
+        local stm = assert(dbh:prepare(q .. " RETURNING *;"));
+        
+        local _, err = stm:execute(...);
 
-assert(sth:execute(host, mode));
-assert(last_insert_rowid:execute());
+        if err then return nil, err end
+        
+        dbh:commit();
 
-dbh:commit();
+        local result = stm:fetch();
 
-local result_id = last_insert_rowid:fetch()[1];
+        if result then
+            return result[1];
+        else
+            return nil, "Not found";
+        end
+    elseif driver_name == "SQLite3" then
+        local stm = assert(dbh:prepare(q));
+
+        local _, err = stm:execute(...);
+
+        if err then return nil, err end
+
+        err = last_insert_rowid:execute();
+
+        if err then return nil, err end
+
+        dbh:commit();
+
+        return last_insert_rowid:fetch()[1];
+    end
+end
+
+local result_id = execute_and_get_id("INSERT INTO test_results (server_name, test_date, type) VALUES (?, 'now', ?)", host, mode)
 
 if opts.verbose then
     verse.set_log_handler(function(part, level, str) io.stdout:write(part .. "  " .. level .. "\t\t" .. str .. "\n") end);
@@ -124,8 +169,9 @@ default_params = { mode = "client",
                   };
 
 local function insert_cert(dbh, cert, srv_result_id, chain_index)
-    local stm = assert(dbh:prepare("SELECT certificate_id FROM certificates WHERE der = ?;"));
-    assert(stm:execute(cert:der()));
+    local stm = assert(dbh:prepare("SELECT certificate_id FROM certificates WHERE der = ?"));
+    local der = hex(cert:der());
+    assert(stm:execute(der));
 
     dbh:commit();
 
@@ -134,31 +180,37 @@ local function insert_cert(dbh, cert, srv_result_id, chain_index)
     local results = stm:fetch();
 
     if not results or #results == 0 then
-        local stm = assert(dbh:prepare("INSERT INTO certificates ( der, notbefore, notafter, digest_sha1, digest_sha256," ..
-                                                                 " digest_sha512, rsa_bitsize, rsa_modulus," ..
-                                                                 " debian_weak_key, sign_algorithm, trusted_root, crl_url, ocsp_url," ..
-                                                                 " subject_key_info, subject_key_info_sha256, subject_key_info_sha512)" ..
-                                        "VALUES (?, DATETIME(?), DATETIME(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, HEX(?), HEX(?));"));
+        local q = "INSERT INTO certificates ( der, notbefore, notafter, digest_sha1, digest_sha256," ..
+                                            " digest_sha512, rsa_bitsize, rsa_modulus," ..
+                                            " debian_weak_key, sign_algorithm, trusted_root, crl_url, ocsp_url," ..
+                                            " subject_key_info, subject_key_info_sha256, subject_key_info_sha512)" ..
+                                        " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM certificates WHERE digest_sha512 = ?)";
 
         local spki = cert:spki();
-        assert(stm:execute(cert:der(), date(cert:notbefore()):fmt("%Y-%m-%d %T"), date(cert:notafter()):fmt("%Y-%m-%d %T"), cert:digest("sha1"), cert:digest("sha256"),
+        cert_id, err = execute_and_get_id(q, der, date(cert:notbefore()):fmt("%Y-%m-%d %T"), date(cert:notafter()):fmt("%Y-%m-%d %T"), cert:digest("sha1"), cert:digest("sha256"),
                            cert:digest("sha512"), cert:bits(), cert:modulus(),
                            debian_weak_key(cert), cert:signature_alg(), false, cert:crl(), cert:ocsp(),
-                           spki, sha256(spki), sha512(spki)));
-        assert(last_insert_rowid:execute());
+                           hex(spki), hex(sha256(spki)), hex(sha512(spki)), cert:digest("sha512"));
 
-        cert_id = last_insert_rowid:fetch()[1];
+        -- A race condition, great. Lets retry the lookup.
+        if err then
+            assert(stm:execute(der));
 
-        stm = assert(dbh:prepare("INSERT INTO certificate_subjects (certificate_id, name, oid, value) VALUES (?, ?, ?, ?)"));
+            dbh:commit();
 
-        for k,v in pairs(cert:subject()) do
-            assert(stm:execute(cert_id, v.name, v.oid, v.value));
+            cert_id = stm:fetch()[1];
+        else
+            stm = assert(dbh:prepare("INSERT INTO certificate_subjects (certificate_id, name, oid, value) VALUES (?, ?, ?, ?)"));
+
+            for k,v in pairs(cert:subject()) do
+                assert(stm:execute(cert_id, v.name, v.oid, v.value));
+            end
         end
     else
         cert_id = results[1];
     end
 
-    local stm = assert(dbh:prepare("INSERT INTO srv_certificates (srv_result_id, certificate_id, chain_index) VALUES (?, ?, ?);"));
+    local stm = assert(dbh:prepare("INSERT INTO srv_certificates (srv_result_id, certificate_id, chain_index) VALUES (?, ?, ?)"));
     assert(stm:execute(srv_result_id, cert_id, chain_index));
 
     dbh:commit();
@@ -215,18 +267,18 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
 
                 outputmanager.print("TLSA verification results:");
 
-                local matches = { [0] = function (c) return string.gsub(c:der(), ".", tohex) end, function (c) return c:digest("sha256") end, function (c) return c:digest("sha512") end }
-                local matches_spki = { [0] = function (c) return string.gsub(c, ".", tohex) end, function (c) return string.gsub(sha256(c), ".", tohex) end, function (c) return string.gsub(sha512(c), ".", tohex) end }
+                local matches = { [0] = function (c) return hex(c:der()) end, function (c) return c:digest("sha256") end, function (c) return c:digest("sha512") end }
+                local matches_spki = { [0] = hex, function (c) return hex(sha256(c)) end, function (c) return hex(sha512(c)) end }
 
                 for k,v in ipairs(tlsa_answer) do
                     v.tlsa.found = false;
                     if v.tlsa.use == 1 or v.tlsa.use == 3 then
                         if v.tlsa.select == 0 then
-                            if matches[v.tlsa.match] and (matches[v.tlsa.match](cert) == string.gsub(v.tlsa.data, ".", tohex)) then
+                            if matches[v.tlsa.match] and (matches[v.tlsa.match](cert) == hex(v.tlsa.data)) then
                                 v.tlsa.found = v.tlsa.use == 3 or chain_valid;
                             end
                         elseif v.tlsa.select == 1 then
-                            if matches_spki[v.tlsa.match] and (matches_spki[v.tlsa.match](cert:spki()) == string.gsub(v.tlsa.data, ".", tohex)) then
+                            if matches_spki[v.tlsa.match] and (matches_spki[v.tlsa.match](cert:spki()) == hex(v.tlsa.data)) then
                                 v.tlsa.found = v.tlsa.use == 3 or chain_valid;
                             end
                         end
@@ -239,11 +291,11 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
                             if not cert then break end;
 
                             if v.tlsa.select == 0 then
-                                if matches[v.tlsa.match] and (matches[v.tlsa.match](cert) == string.gsub(v.tlsa.data, ".", tohex)) then
+                                if matches[v.tlsa.match] and (matches[v.tlsa.match](cert) == hex(v.tlsa.data)) then
                                     v.tlsa.found = v.tlsa.use == 2 or chain_valid;
                                 end
                             elseif v.tlsa.select == 1 then
-                                if matches_spki[v.tlsa.match] and (matches_spki[v.tlsa.match](cert) == string.gsub(v.tlsa.data, ".", tohex)) then
+                                if matches_spki[v.tlsa.match] and (matches_spki[v.tlsa.match](cert) == hex(v.tlsa.data)) then
                                     v.tlsa.found = v.tlsa.use == 2 or chain_valid;
                                 end
                             end
@@ -256,7 +308,7 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
                 for k,v in ipairs(tlsa_answer) do
                     outputmanager.print_no_nl((v.tlsa.found and (outputmanager.green .. "Success") or (outputmanager.red .. "Fail")) .. outputmanager.reset .. ": ");
                     outputmanager.print_no_nl(v.tlsa:getUsage() .. " " .. v.tlsa:getSelector() .. " " .. v.tlsa:getMatchType() .. " (");
-                    outputmanager.print(((v.tlsa.match == 1 or v.tlsa.match == 2) and certmanager.pretty_fingerprint(string.gsub(v.tlsa.data, ".", tohex)) or (string.gsub(v.tlsa.data, ".", tohex):sub(1, 128) .. "...")) .. ").");
+                    outputmanager.print(((v.tlsa.match == 1 or v.tlsa.match == 2) and certmanager.pretty_fingerprint(hex(v.tlsa.data)) or (hex(v.tlsa.data:sub(1, 64)) .. "...")) .. ").");
                 end
 
                 outputmanager.line();
@@ -304,7 +356,7 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
                 chain[#chain + 1] = cert_id;
 
                 if #chain > 1 then
-                    local stm = assert(dbh:prepare("UPDATE certificates SET signed_by_id = ? WHERE certificate_id = ?;"));
+                    local stm = assert(dbh:prepare("UPDATE certificates SET signed_by_id = ? WHERE certificate_id = ?"));
 
                     assert(stm:execute(cert_id, chain[#chain - 1]));
 
@@ -325,10 +377,10 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
 
                 if new_cert == nil then break end;
 
-                if new_cert == current_cert then
+                if new_cert:pem() == current_cert:pem() then
                     outputmanager.print("Self signed certificate.");
 
-                    local stm = assert(dbh:prepare("UPDATE certificates SET signed_by_id = ? WHERE certificate_id = ?;"));
+                    local stm = assert(dbh:prepare("UPDATE certificates SET signed_by_id = ? WHERE certificate_id = ?"));
 
                     assert(stm:execute(cert_id, cert_id));
 
@@ -520,7 +572,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
         if not info then
             outputmanager.print("Server " .. outputmanager.green .. "requires" .. outputmanager.reset .. " initiating server to present a certificate.");
 
-            local sth = assert(dbh:prepare("UPDATE srv_results SET requires_peer_cert = 1 WHERE srv_result_id = ?"));
+            local sth = assert(dbh:prepare("UPDATE srv_results SET requires_peer_cert = '1' WHERE srv_result_id = ?"));
             assert(sth:execute(srv_result_id));
 
             dbh:commit();
@@ -597,7 +649,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
     for k,v in ipairs(protocols) do
         -- v can only be sslv2, sslv3, tlsv1, tlsv1_1 or tlsv1_2, so this is fine. Really.
-        local sth = assert(dbh:prepare("UPDATE srv_results SET " .. v .. " = 1 WHERE srv_result_id = ?"));
+        local sth = assert(dbh:prepare("UPDATE srv_results SET " .. v .. " = '1' WHERE srv_result_id = ?"));
         assert(sth:execute(srv_result_id));
     end
 
@@ -663,7 +715,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
             outputmanager.print("Server does " .. outputmanager.red .. "not" .. outputmanager.reset .. " respect client's cipher ordering. Server's order:");
             should_sort = false;
 
-            local sth = assert(dbh:prepare("UPDATE srv_results SET reorders_ciphers = 1 WHERE srv_result_id = ?"));
+            local sth = assert(dbh:prepare("UPDATE srv_results SET reorders_ciphers = '1' WHERE srv_result_id = ?"));
             assert(sth:execute(srv_result_id));
 
             dbh:commit();
@@ -692,7 +744,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
     local sth = assert(dbh:prepare("INSERT INTO srv_ciphers (srv_result_id, cipher_id, cipher_index) VALUES (?, ?, ?)"));
 
     for k,v in ipairs(ciphers) do
-        assert(sth:execute(k - 1, srv_result_id, ciphertable.find(v.cipher)));
+        assert(sth:execute(srv_result_id, ciphertable.find(v.cipher), k - 1));
 
         outputmanager.print(pretty_cipher(v));
         if v.bits < min_bits then min_bits = v.bits; end;
@@ -834,7 +886,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
         outputmanager.print("Grade: " .. grade(total_score) .. outputmanager.reset);
     end
 
-    local sth = assert(dbh:prepare("UPDATE srv_results SET total_score = ?, grade = ? WHERE srv_result_id = ?"));
+    local sth = assert(dbh:prepare("UPDATE srv_results SET total_score = ?, grade = ?, done = '1' WHERE srv_result_id = ?"));
     assert(sth:execute(total_score, ((fail_untrusted or fail_ssl2) and "F") or grade(total_score), srv_result_id));
 
     dbh:commit();
@@ -843,72 +895,82 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 end
 
 co = coroutine.create(function ()
-    local f = adns.lookup(function (a) coroutine.resume(co, a) end, "_xmpp-" .. mode .. "._tcp." .. to_ascii(host), "SRV");
-    local srv_records = coroutine.yield();
+    assert(pcall(function ()
+        local f = adns.lookup(function (a) coroutine.resume(co, a) end, "_xmpp-" .. mode .. "._tcp." .. to_ascii(host), "SRV");
+        local srv_records = coroutine.yield();
 
-    outputmanager.print("DNS details:");
+        outputmanager.print("DNS details:");
 
-    if srv_records.secure then
-        outputmanager.print("SRV records verified using " .. outputmanager.green .. "DNSSEC" .. outputmanager.reset .. ".");
-    elseif srv_records.bogus then
-        outputmanager.print("SRV records failed " .. outputmanager.red .. "DNSSEC" .. outputmanager.reset .. " validation.");
-    end
+        if srv_records.secure then
+            outputmanager.print("SRV records verified using " .. outputmanager.green .. "DNSSEC" .. outputmanager.reset .. ".");
+        elseif srv_records.bogus then
+            outputmanager.print("SRV records failed " .. outputmanager.red .. "DNSSEC" .. outputmanager.reset .. " validation.");
+        end
 
-    outputmanager.print("SRV records:");
+        if #srv_records > 0 then
+            outputmanager.print("SRV records:");
 
-    outputmanager.print(srv_records);
+            outputmanager.print(srv_records);
 
-    outputmanager.line();
+            outputmanager.line();
 
-    local stm = assert(dbh:prepare("INSERT INTO srv_results (test_id, priority, weight, port, target, sslv2, sslv3, tlsv1, tlsv1_1, tlsv1_2, reorders_ciphers, cipher_score, certificate_score, keysize_score, protocol_score, total_score, requires_peer_cert) " ..
-                                         "VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);"));
-    
-    for k,v in ipairs(srv_records) do
-        local srv = v.srv;
-        assert(stm:execute(result_id, srv.priority, srv.weight, srv.port, srv.target));
-        assert(last_insert_rowid:execute());
+        else
+            local port = (mode == "client" and 5222) or 5269;
+
+            outputmanager.print(outputmanager.red .. "No SRV records found. Falling back to " .. host .. ":" .. port .. "." .. outputmanager.reset);
+            srv_records = { { srv = { priority = 1, weight = 1, port = port, target = host } } };
+        end
+
+        local q = "INSERT INTO srv_results (test_id, priority, weight, port, target, sslv2, sslv3, tlsv1, tlsv1_1, tlsv1_2, reorders_ciphers, cipher_score, certificate_score, keysize_score, protocol_score, total_score, requires_peer_cert, done) " ..
+                                             "VALUES (?, ?, ?, ?, ?, '0', '0', '0', '0', '0', '0', 0, 0, 0, 0, 0.0, '0', '0')";
+        
+        for k,v in ipairs(srv_records) do
+            local srv = v.srv;
+            local srv_id = execute_and_get_id(q, result_id, srv.priority, srv.weight, srv.port, srv.target);
+
+            outputmanager.print("Testing SRV record: " .. srv.priority .. " " .. srv.weight .. " " .. srv.port .. " " .. srv.target);
+
+            local tlsa = "_" .. srv.port .. "._tcp." .. srv.target;
+            local tlsa_supported = (not require("net.dns").types) or (require("net.dns").types[52] == "TLSA");
+            local tlsa_answer = nil;
+
+            if tlsa_supported then
+
+                outputmanager.print("TLSA records:");
+
+                local f = adns.lookup(function (a) coroutine.resume(co, a) end, tlsa, "TLSA");
+
+                tlsa_answer = coroutine.yield();
+
+                if tlsa_answer.secure then
+                    outputmanager.print(outputmanager.green .. "DNSSEC secured" .. outputmanager.reset .. " TLSA records for " .. tlsa .. ":\n" .. tostring(tlsa_answer));
+                elseif tlsa_answer.bogus then
+                    outputmanager.print(outputmanager.red .. "bogus" .. outputmanager.reset " TLSA records for " .. tlsa .. ":\n" .. tostring(tlsa_answer));
+                end
+
+                local stm = assert(dbh:prepare("INSERT INTO tlsa_records (srv_result_id, usage, selector, match, data) VALUES (?, ?, ?, ?, ?)"));
+
+                for l,w in ipairs(tlsa_answer) do
+                    assert(stm:execute(srv_id, w.tlsa.use, w.tlsa.select, w.tlsa.match, hex(w.tlsa.data)));
+                end
+
+                dbh:commit();
+            else
+                outputmanager.print("No luaunbound support detected. Skipping TLSA records.");
+            end
+
+            test_server(srv.target, srv.port, co, tlsa_answer, srv_id);
+            outputmanager.line();
+        end
+
+        outputmanager.finish();
 
         dbh:commit();
 
-        local srv_id = last_insert_rowid:fetch()[1];
-
-        outputmanager.print("Testing SRV record: " .. srv.priority .. " " .. srv.weight .. " " .. srv.port .. " " .. srv.target);
-
-        local tlsa = "_" .. srv.port .. "._tcp." .. srv.target;
-        local tlsa_supported = (not require("net.dns").types) or (require("net.dns").types[52] == "TLSA");
-        local tlsa_answer = nil;
-
-        if tlsa_supported then
-
-            outputmanager.print("TLSA records:");
-
-            local f = adns.lookup(function (a) coroutine.resume(co, a) end, tlsa, "TLSA");
-
-            tlsa_answer = coroutine.yield();
-
-            if tlsa_answer.secure then
-                outputmanager.print(outputmanager.green .. "DNSSEC secured" .. outputmanager.reset .. " TLSA records for " .. tlsa .. ":\n" .. tostring(tlsa_answer));
-            elseif tlsa_answer.bogus then
-                outputmanager.print(outputmanager.red .. "bogus" .. outputmanager.reset " TLSA records for " .. tlsa .. ":\n" .. tostring(tlsa_answer));
-            end
-
-            local stm = assert(dbh:prepare("INSERT INTO tlsa_records (srv_result_id, usage, selector, match, data) VALUES (?, ?, ?, ?, ?);"));
-
-            for l,w in ipairs(tlsa_answer) do
-                assert(stm:execute(srv_id, w.tlsa.use, w.tlsa.select, w.tlsa.match, w.tlsa.data));
-            end
-
-            dbh:commit();
-        else
-            outputmanager.print("No luaunbound support detected. Skipping TLSA records.");
-        end
-
-        test_server(srv.target, srv.port, co, tlsa_answer, srv_id);
-        outputmanager.line();
-    end
-
-    outputmanager.finish();
-
+        dbh:close();
+        
+        return true;
+    end));
     os.exit();
 end)
 
