@@ -729,7 +729,7 @@
 		local parts = {};
 		local y = math.floor(diff / 365);
 		diff = diff - y * 365;
-		if y > 0 then parts[#parts + 1] = tostring(y) .. " year" .. (y > 2 and "s" or "") end
+		if y > 0 then parts[#parts + 1] = tostring(y) .. " year" .. (y > 1 and "s" or "") end
 		local m = math.floor(diff / (365/12));
 		diff = diff - m * (365/12);
 		if m > 0 then parts[#parts + 1] = tostring(m) .. " month" .. (m > 1 and "s" or "") end

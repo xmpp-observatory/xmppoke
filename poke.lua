@@ -1,3 +1,5 @@
+-- Configuration handling
+
 local short_opts = { v = "verbose", h = "html", o = "output", m = "mode", d = "delay" }
 local opts = { mode = "client", html = false, output = "reports", verbose = false, delay = "2", capath = "/etc/ssl/certs", cafile = nil, key = nil, certificate = nil, blacklist = "/usr/share/openssl-blacklist/" };
 
@@ -27,77 +29,38 @@ end
 
 local jid = host;
 
-local date = require("3rdparty/date")
+-- Imports
+
+local date = require("3rdparty/date");
 local ssl = require("ssl");
 local io = require("io");
 local os = require("os");
 local ciphertable = require("ciphertable");
 local adns = require("net.adns");
-
+local outputmanager = require("output")(use_html and "html" or "ansi");
+local certmanager = require("certs")(openssl_blacklists);
+local dbi = require('DBI');
 local cert_verify_identity = require "util.x509".verify_identity;
-local sha1 = require "util.hashes".sha1;
+local verse = require("verse").init(mode);
+local to_ascii = require "util.encodings".idna.to_ascii;
+local sha512 = require("util.hashes").sha512;
+local sha256 = require("util.hashes").sha256;
 
-local boldred, red, boldgreen, green, boldblue, reset;
+outputmanager.init(opts.output, mode, host);
 
-if not use_html then
-    boldred = string.char(0x1b) .. "[31;1m";
-    red = string.char(0x1b) .. "[31m";
-    boldgreen = string.char(0x1b) .. "[32;1m";
-    green = string.char(0x1b) .. "[32m";
-    boldblue = string.char(0x1b) .. "[34;1m";
-    reset = string.char(0x1b) .. "[0m";
-else
-    boldred = "<span style='color: red; font-weight: bold;'>";
-    red = "<span style='color: red'>";
-    boldgreen = "<span style='color: green; font-weight: bold;'>";
-    green = "<span style='color: green'>";
-    boldblue = "<span style='color: blue; font-weight: bold;'>";
-    reset= "</span>";
-end
+local dbh = assert(dbi.Connect("SQLite3", "results.db", nil, nil, nil, nil));
 
-if use_html then
-    report = io.open(opts.output .. "/" .. mode .. "-" .. host .. ".html", "w");
-    report:write("<html>");
-    report:write("<head>");
-    report:write("<meta http-equiv='Content-Type' content='text/html; charset=UTF-8' />");
-    report:write("<title>XMPP TLS report for " .. host .. "</title>");
-    report:write("</head>");
-    report:write("");
-    report:write("<body>");
-    report:write("<h2>XMPP " .. mode .. "-to-server TLS report for " .. host .. "</h2><b>Date: " .. date() .. "</b><hr />");
-    report:write("<pre>");
-end
+dbh:autocommit(false);
 
-function print(str)
-    print_no_nl(tostring(str) .. "\n");
-end
+local sth = assert(dbh:prepare("INSERT INTO test_results (server_name, test_date, type) VALUES (?, DATETIME('now'), ?)"));
+local last_insert_rowid = assert(dbh:prepare("SELECT last_insert_rowid() AS li;"));
 
-function print_no_nl(str)
-    if use_html then
-        report:write(str);
-        report:flush();
-    else
-        io.stdout:write(str);
-    end
-end
+assert(sth:execute(host, mode));
+assert(last_insert_rowid:execute());
 
-function finish()
-    if use_html then
-        report:write("</pre>");
-        report:write("</body>");
-        report:write("</html>");
-    end
-end
+dbh:commit();
 
-local function line()
-    if use_html then
-        report:write("\n<hr />\n");
-    else
-        print("---");
-    end
-end
-
-require("verse").init(mode);
+local result_id = last_insert_rowid:fetch()[1];
 
 if opts.verbose then
     verse.set_log_handler(function(part, level, str) io.stdout:write(part .. "  " .. level .. "\t\t" .. str .. "\n") end);
@@ -106,30 +69,6 @@ end
 local total_score = 0;
 local fail_untrusted = false;
 local fail_ssl2 = false;
-
-local function print_subject(print, subject)
-    for _, entry in ipairs(subject) do
-        print(("    %s: %q"):format(entry.name or entry.oid, entry.value:gsub("[\r\n%z%c]", " ")));
-    end
-end
-
-local function _capitalize_and_colon(byte)
-    return string.upper(byte)..":";
-end
-
-local function pretty_fingerprint(hash)
-    return hash:gsub("..", _capitalize_and_colon):sub(1, -2);
-end
-
-local function print_errors(print, errors)
-    if type(errors) == "string" then
-        print("    0: " .. errors);
-    else
-        for depth, t in pairs(errors) do
-            print(("    %d: %s"):format(depth-1, table.concat(t, "\n       ")));
-        end
-    end
-end
 
 local function deep_equal(a, b)
     if type(a) ~= type(b) then
@@ -151,81 +90,19 @@ local function deep_equal(a, b)
     return a == b;
 end
 
-local function pretty_cert(current_cert)
-    print("Subject:");
-    print_subject(print, current_cert:subject());
-
-    print("");
-
-    print("Fingerprint (SHA1): "..pretty_fingerprint(current_cert:digest("sha1")));
-    print("Fingerprint (SHA256): "..pretty_fingerprint(current_cert:digest("sha256")));
-    print("Fingerprint (SHA512): "..pretty_fingerprint(current_cert:digest("sha512")));
-
-    local bits = current_cert:bits();
-
-    local modulus_hash_raw = sha1("Modulus="..current_cert:modulus().."\n");
-    local modulus_hash = "";
-
-    for j=1,#modulus_hash_raw do
-        modulus_hash = modulus_hash .. string.format("%02x", modulus_hash_raw:byte(j, j+1));
-    end
-
-    local blacklist = openssl_blacklists and io.open(openssl_blacklists .. "/blacklist.RSA-" .. bits) or nil;
-
-    if blacklist then
-        local found = false;
-
-        while true do
-            local line = blacklist:read("*l");
-
-            if not line then break; end
-
-            if line == modulus_hash:sub(20) then
-                found = true;
-                break
-            end
+local function deep_copy(orig)
+    local orig_type = type(orig);
+    local copy;
+    if orig_type == 'table' then
+        copy = {};
+        for orig_key, orig_value in next, orig, nil do
+            copy[deep_copy(orig_key)] = deep_copy(orig_value);
         end
-
-        if found then
-            print(boldred .. "Uses a weak Debian key! See https://wiki.debian.org/SSLkeys" .. reset);
-        end
+        setmetatable(copy, deep_copy(getmetatable(orig)));
     else
-        print("Can not determine whether a key with bit size " .. bits .. " is a weak Debian key.");
+        copy = orig;
     end
-
-    local judgement = "";
-    local signature_alg = current_cert:signature_alg();
-
-    if signature_alg == "md5WithRSAEncryption" then
-        judgement = boldred .. " INSECURE!" .. reset;
-    end
-
-    print("");
-
-    print("Signature algorithm: " .. signature_alg .. judgement);
-
-    print("Key size: " .. bits .. " bits");
-
-    print("");
-
-    local notbefore = date(current_cert:notbefore());
-    local notafter = date(current_cert:notafter());
-    local now = date();
-
-    print("Valid from: " .. notbefore:fmt("%F %T GMT") .. " (" .. date.fuzzy_range(now, notbefore) .. ")");
-    print("Valid to: " .. notafter:fmt("%F %T GMT") .. " (" .. date.fuzzy_range(now, notafter) .. ")");
-
-    if now < notbefore then
-        print(boldred .. "Certificate is not yet valid." .. reset);
-    end
-    if now > notafter then
-        print(boldred .. "Certificate is expired." .. reset);
-    end
-
-    local crl_url = current_cert:crl();
-    local ocsp_url = current_cert:ocsp();
-
-    print("Revocation:" .. (crl_url and  " CRL: " .. crl_url or "") .. (ocsp_url and  " OCSP: " .. ocsp_url or ""));
+    return copy;
 end
 
 local function keysize_score(bits)
@@ -246,12 +123,58 @@ default_params = { mode = "client",
                   certificate = certificate,
                   };
 
-function test_cert()
+local function insert_cert(dbh, cert, srv_result_id, chain_index)
+    local stm = assert(dbh:prepare("SELECT certificate_id FROM certificates WHERE der = ?;"));
+    assert(stm:execute(cert:der()));
+
+    dbh:commit();
+
+    local cert_id = nil;
+
+    local results = stm:fetch();
+
+    if not results or #results == 0 then
+        local stm = assert(dbh:prepare("INSERT INTO certificates ( der, notbefore, notafter, digest_sha1, digest_sha256," ..
+                                                                 " digest_sha512, rsa_bitsize, rsa_modulus," ..
+                                                                 " debian_weak_key, sign_algorithm, trusted_root, crl_url, ocsp_url," ..
+                                                                 " subject_key_info, subject_key_info_sha256, subject_key_info_sha512)" ..
+                                        "VALUES (?, DATETIME(?), DATETIME(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, HEX(?), HEX(?));"));
+
+        local spki = cert:spki();
+        assert(stm:execute(cert:der(), date(cert:notbefore()):fmt("%Y-%m-%d %T"), date(cert:notafter()):fmt("%Y-%m-%d %T"), cert:digest("sha1"), cert:digest("sha256"),
+                           cert:digest("sha512"), cert:bits(), cert:modulus(),
+                           debian_weak_key(cert), cert:signature_alg(), false, cert:crl(), cert:ocsp(),
+                           spki, sha256(spki), sha512(spki)));
+        assert(last_insert_rowid:execute());
+
+        cert_id = last_insert_rowid:fetch()[1];
+
+        stm = assert(dbh:prepare("INSERT INTO certificate_subjects (certificate_id, name, oid, value) VALUES (?, ?, ?, ?)"));
+
+        for k,v in pairs(cert:subject()) do
+            assert(stm:execute(cert_id, v.name, v.oid, v.value));
+        end
+    else
+        cert_id = results[1];
+    end
+
+    local stm = assert(dbh:prepare("INSERT INTO srv_certificates (srv_result_id, certificate_id, chain_index) VALUES (?, ?, ?);"));
+    assert(stm:execute(srv_result_id, cert_id, chain_index));
+
+    dbh:commit();
+
+    return cert_id;
+end
+
+function test_cert(target, port, tlsa_answer, srv_result_id)
     local c = verse.new();
     local done = false;
 
-    c.tlsparams = deepcopy(default_params);
+    c.tlsparams = deep_copy(default_params);
     c.tlsparams.protocol = "sslv23";
+
+    c.connect_host = target;
+    c.connect_port = port;
 
     c:hook("outgoing-raw", function (data) return c:debug("OUT: " .. data); end);
     c:hook("incoming-raw", function (data) return c:debug("IN: " .. data); end);
@@ -260,229 +183,221 @@ function test_cert()
         local stanza = features_stanza:get_child("starttls", "urn:ietf:params:xml:ns:xmpp-tls");
 
         if stanza and stanza:get_child("required") then
-            print("Server " .. green .. "requires" .. reset .. " starttls.");
+            outputmanager.print("Server " .. outputmanager.green .. "requires" .. outputmanager.reset .. " starttls.");
         elseif stanza then
-            print("Server " .. red .. "allows" .. reset .. " starttls.");
+            outputmanager.print("Server " .. outputmanager.red .. "allows" .. outputmanager.reset .. " starttls.");
         else
-            print(boldred .. "Server does not offer starttls!" .. reset);
+            outputmanager.print(outputmanager.boldred .. "Server does not offer starttls!" .. outputmanager.reset);
             os.exit();
         end
     end, 1000);
 
     c:hook("status", function (status)
         if status == "ssl-handshake-complete" and not done then
-            local dnsco = coroutine.create(function (dnsco)
+            local conn = c.conn:socket();
 
-                line();
+            if not conn.getpeercertificate then
+                outputmanager.line();
 
-                print("DNS details:");
+                outputmanager.print(outputmanager.boldred .. "No TLS support detected!" .. outputmanager.reset);
 
-                print("SRV records:")
-                for k,v in ipairs(c.srv_hosts) do
-                    print((c.srv_choice == k and "* " or "  ") .. v.priority .. " " .. v.weight .. " " .. v.port .. " " .. v.target);
-                end
+                outputmanager.line();
+                finish();
+                os.exit();
+            end
 
-                if c.srv_answer.secure then
-                    print("SRV records verified using " .. green .. "DNSSEC" .. reset .. ".");
-                elseif c.srv_answer.bogus then
-                    print("SRV records failed " .. red .. "DNSSEC" .. reset .. " validation.");
-                end
+            outputmanager.line();
 
-                line();
+            local cert = conn:getpeercertificate();
+            local chain_valid, errors = conn:getpeerverification();
 
-                local srv = c.srv_hosts[c.srv_choice];
-                local tlsa = "_" .. srv.port .. "._tcp." .. srv.target;
-                local tlsa_supported = (not require("net.dns").types) or (require("net.dns").types[52] == "TLSA");
-                local tlsa_answer = nil;
+            if tlsa_answer then
 
-                if tlsa_supported then
+                outputmanager.print("TLSA verification results:");
 
-                    print("TLSA records:");
+                local matches = { [0] = function (c) return string.gsub(c:der(), ".", tohex) end, function (c) return c:digest("sha256") end, function (c) return c:digest("sha512") end }
+                local matches_spki = { [0] = function (c) return string.gsub(c, ".", tohex) end, function (c) return string.gsub(sha256(c), ".", tohex) end, function (c) return string.gsub(sha512(c), ".", tohex) end }
 
-                    local f = adns.lookup(function (a) coroutine.resume(dnsco, a) end, tlsa, "TLSA");
-
-                    tlsa_answer = coroutine.yield();
-
-                    if tlsa_answer.secure then
-                        print(green .. "DNSSEC secured" .. reset .. " TLSA records for " .. tlsa .. ":\n" .. tostring(tlsa_answer));
-                    elseif tlsa_answer.bogus then
-                        print(red .. "bogus" .. reset " TLSA records for " .. tlsa .. ":\n" .. tostring(tlsa_answer));
-                    end
-                else
-                    print("No luaunbound support detected. Skipping TLSA records.");
-                end
-
-                local conn = c.conn:socket();
-
-                if not conn.getpeercertificate then
-                    line();
-
-                    print(boldred .. "No TLS support detected!" .. reset);
-
-                    line();
-                    finish();
-                    os.exit();
-                end
-
-                line();
-
-                local cert = conn:getpeercertificate();
-                local chain_valid, errors = conn:getpeerverification();
-
-                if tlsa_supported then
-
-                    print("TLSA verification results:");        
-
-                    local tohex = function(c) return string.format("%02x", string.byte(c)); end
-
-                    local matches = { [0] = function (c) return string.gsub(c:der(), ".", tohex) end, function (c) return c:digest("sha256") end, function (c) return c:digest("sha512") end }
-
-                    for k,v in ipairs(tlsa_answer) do
-                        v.tlsa.found = false;
-                        if v.tlsa.use == 1 or v.tlsa.use == 3 then
-                            if v.tlsa.select == 0 then
-                                if matches[v.tlsa.match] and (matches[v.tlsa.match](cert) == string.gsub(v.tlsa.data, ".", tohex)) then
-                                    v.tlsa.found = v.tlsa.use == 3 or chain_valid;
-                                end
+                for k,v in ipairs(tlsa_answer) do
+                    v.tlsa.found = false;
+                    if v.tlsa.use == 1 or v.tlsa.use == 3 then
+                        if v.tlsa.select == 0 then
+                            if matches[v.tlsa.match] and (matches[v.tlsa.match](cert) == string.gsub(v.tlsa.data, ".", tohex)) then
+                                v.tlsa.found = v.tlsa.use == 3 or chain_valid;
                             end
-                        elseif v.tlsa.use == 0 or v.tlsa.use == 2 then
-                            local i = 2;
+                        elseif v.tlsa.select == 1 then
+                            if matches_spki[v.tlsa.match] and (matches_spki[v.tlsa.match](cert:spki()) == string.gsub(v.tlsa.data, ".", tohex)) then
+                                v.tlsa.found = v.tlsa.use == 3 or chain_valid;
+                            end
+                        end
+                    elseif v.tlsa.use == 0 or v.tlsa.use == 2 then
+                        local i = 2;
 
-                            while true do
-                                local cert = conn:getpeercertificate(i);
+                        while true do
+                            local cert = conn:getpeercertificate(i);
 
-                                if not cert then break end;
+                            if not cert then break end;
 
+                            if v.tlsa.select == 0 then
                                 if matches[v.tlsa.match] and (matches[v.tlsa.match](cert) == string.gsub(v.tlsa.data, ".", tohex)) then
                                     v.tlsa.found = v.tlsa.use == 2 or chain_valid;
                                 end
-
-                                i = i + 1;
+                            elseif v.tlsa.select == 1 then
+                                if matches_spki[v.tlsa.match] and (matches_spki[v.tlsa.match](cert) == string.gsub(v.tlsa.data, ".", tohex)) then
+                                    v.tlsa.found = v.tlsa.use == 2 or chain_valid;
+                                end
                             end
+
+                            i = i + 1;
                         end
                     end
-
-                    for k,v in ipairs(tlsa_answer) do
-                        print_no_nl((v.tlsa.found and (green .. "Success") or (red .. "Fail")) .. reset .. ": ");
-                        print_no_nl(v.tlsa:getUsage() .. " " .. v.tlsa:getSelector() .. " " .. v.tlsa:getMatchType() .. " (");
-                        print(((v.tlsa.match == 1 or v.tlsa.match == 2) and pretty_fingerprint(string.gsub(v.tlsa.data, ".", tohex)) or (string.gsub(v.tlsa.data, ".", tohex):sub(1, 32) .. "...")) .. ").");
-                    end
-
-                    line();
                 end
 
-                print("Certificate details:");
-                
-                local chain_valid, errors = conn:getpeerverification();
-                local valid_identity = cert_verify_identity(host, "xmpp-"..mode, cert);
-                print("Valid for "..host..": "..(valid_identity and "Yes" or boldred .. "No" .. reset));
-
-                if chain_valid then
-                    print("Trusted certificate: Yes");
-                else
-                    print("Trusted certificate: " .. red .. "No" .. reset);
-                    print_errors(print, errors);
-                    fail_untrusted = true;
+                for k,v in ipairs(tlsa_answer) do
+                    outputmanager.print_no_nl((v.tlsa.found and (outputmanager.green .. "Success") or (outputmanager.red .. "Fail")) .. outputmanager.reset .. ": ");
+                    outputmanager.print_no_nl(v.tlsa:getUsage() .. " " .. v.tlsa:getSelector() .. " " .. v.tlsa:getMatchType() .. " (");
+                    outputmanager.print(((v.tlsa.match == 1 or v.tlsa.match == 2) and certmanager.pretty_fingerprint(string.gsub(v.tlsa.data, ".", tohex)) or (string.gsub(v.tlsa.data, ".", tohex):sub(1, 128) .. "...")) .. ").");
                 end
 
-                if not valid_identity then
-                    fail_untrusted = true;
+                outputmanager.line();
+            end
+
+            outputmanager.print("Certificate details:");
+            
+            local chain_valid, errors = conn:getpeerverification();
+            local valid_identity = cert_verify_identity(host, "xmpp-"..mode, cert);
+            outputmanager.print("Valid for "..host..": "..(valid_identity and "Yes" or outputmanager.boldred .. "No" .. outputmanager.reset));
+
+            if chain_valid then
+                outputmanager.print("Trusted certificate: Yes");
+            else
+                outputmanager.print("Trusted certificate: " .. outputmanager.red .. "No" .. outputmanager.reset);
+                certmanager.print_errors(outputmanager.print, errors);
+                fail_untrusted = true;
+            end
+
+            if not valid_identity then
+                fail_untrusted = true;
+            end
+
+            outputmanager.line();
+            outputmanager.print("Certificate chain:");
+
+            local certs = conn:getpeerchain();
+            local current_cert = cert;
+            local used_certs = {};
+            local chain = {};
+
+            local i = 1;
+
+            while true do
+
+                used_certs[i] = true;
+
+                outputmanager.line();
+
+                outputmanager.print(i-1 .. ":");
+
+                pretty_cert(outputmanager, current_cert);
+                local cert_id = insert_cert(dbh, current_cert, srv_result_id, i - 1);
+
+                chain[#chain + 1] = cert_id;
+
+                if #chain > 1 then
+                    local stm = assert(dbh:prepare("UPDATE certificates SET signed_by_id = ? WHERE certificate_id = ?;"));
+
+                    assert(stm:execute(cert_id, chain[#chain - 1]));
+
+                    dbh:commit();
                 end
 
-                line();
-                print("Certificate chain:");
-
-                local certs = conn:getpeerchain();
-                local current_cert = cert;
-                local used_certs = {};
-
-                local i = 1;
-
-                while true do
-
-                    used_certs[i] = true;
-
-                    line();
-
-                    print(i-1 .. ":");
-
-                    pretty_cert(current_cert);
-
-                    local new_cert = nil;
-                    i = nil;
-
-                    for k,v in ipairs(certs) do
-                        local res, err = conn:did_issue(v, current_cert);
-                        if res > 0 then
-                            new_cert = v;
-                            i = k;
-                            break;
-                        end
-                    end
-
-                    if new_cert == nil then break end;
-
-                    if new_cert == current_cert then
-                        print("Self signed certificate.");
-                        break;
-                    end
-
-                    if used_certs[i] then
-                        print(red .. "Certificate chain contains a cycle." .. reset);
-                        break;
-                    end
-
-                    current_cert = new_cert;
-                end
-
-                line();
+                local new_cert = nil;
+                i = nil;
 
                 for k,v in ipairs(certs) do
-                    if not used_certs[k] then
-                        print(red .. "Found unused certificate in chain:" .. reset);
-                        print(k-1 .. ":");
-
-                        pretty_cert(v);
-
-                        line();
+                    local res, err = conn:did_issue(v, current_cert);
+                    if res > 0 then
+                        new_cert = v;
+                        i = k;
+                        break;
                     end
                 end
 
-                -- Hack: if the subject is identical, we assume the server sent its root CA too.
-                if deep_equal(current_cert:issuer(), current_cert:subject()) then
-                    print(red .. "Root CA certificate was included in chain." .. reset);
-                else
-                    print("Root CA: ");
-                    print_subject(print, current_cert:issuer());
+                if new_cert == nil then break end;
+
+                if new_cert == current_cert then
+                    outputmanager.print("Self signed certificate.");
+
+                    local stm = assert(dbh:prepare("UPDATE certificates SET signed_by_id = ? WHERE certificate_id = ?;"));
+
+                    assert(stm:execute(cert_id, cert_id));
+
+                    dbh:commit();
+
+                    break;
                 end
 
-                local certificate_score = 0;
-
-                if chain_valid and valid_identity then
-                    certificate_score = 100;
+                if used_certs[i] then
+                    outputmanager.print(outputmanager.red .. "Certificate chain contains a cycle." .. outputmanager.reset);
+                    break;
                 end
 
-                line();
+                current_cert = new_cert;
+            end
 
-                print(green .. "Certificate score: " .. certificate_score .. reset);
-                print(green .. "Key exchange score: " .. keysize_score(cert:bits()) .. reset);
+            outputmanager.line();
 
-                total_score = total_score + 0.3 * keysize_score(cert:bits());
+            for k,v in ipairs(certs) do
+                if not used_certs[k] then
+                    outputmanager.print(outputmanager.red .. "Found unused certificate in chain:" .. outputmanager.reset);
+                    outputmanager.print(k-1 .. ":");
 
-                line();
-                print("Compression: " .. (conn:info("compression") or "none"));
-                line();
+                    pretty_cert(outputmanager, v);
+                    insert_cert(dbh, v, srv_result_id, k - 1);
 
-                done = true;
+                    outputmanager.line();
+                end
+            end
 
-                c:debug("Closing stream");
-                c.conn:socket():close();
-                
-                verse.add_task(sleep_for, function ()
-                    coroutine.resume(co);
-                end);
+            -- Hack: if the subject is identical, we assume the server sent its root CA too.
+            if deep_equal(current_cert:issuer(), current_cert:subject()) then
+                outputmanager.print(outputmanager.red .. "Root CA certificate was included in chain." .. outputmanager.reset);
+            else
+                outputmanager.print("Root CA: ");
+                certmanager.print_subject(outputmanager.print, current_cert:issuer());
+            end
+
+            local certificate_score = 0;
+
+            if chain_valid and valid_identity then
+                certificate_score = 100;
+            end
+
+            outputmanager.line();
+
+            outputmanager.print(outputmanager.green .. "Certificate score: " .. certificate_score .. outputmanager.reset);
+            outputmanager.print(outputmanager.green .. "Key exchange score: " .. keysize_score(cert:bits()) .. outputmanager.reset);
+
+            total_score = total_score + 0.3 * keysize_score(cert:bits());
+
+            outputmanager.line();
+            outputmanager.print("Compression: " .. (conn:info("compression") or "none"));
+            
+            local sth = assert(dbh:prepare("UPDATE srv_results SET compression = ?, keysize_score = ?, certificate_score = ? WHERE srv_result_id = ?"));
+            assert(sth:execute(conn:info("compression"), keysize_score(cert:bits()), certificate_score, srv_result_id));
+
+            dbh:commit();
+
+            outputmanager.line();
+
+            done = true;
+
+            c:debug("Closing stream");
+            c.conn:socket():close();
+            
+            verse.add_task(sleep_for, function ()
+                coroutine.resume(co);
             end);
-            coroutine.resume(dnsco, dnsco);
         end
         return false;
     end, 1000);
@@ -499,11 +414,13 @@ function test_cert()
     c:connect_client(jid);
 end
 
-function test_params(params)
+function test_params(target, port, params)
     local c = verse.new();
     local done = false;
 
     c.tlsparams = params;
+    c.connect_host = target;
+    c.connect_port = port;
 
     c:hook("status", function (status)
         if status == "ssl-handshake-complete" and not done then
@@ -535,11 +452,11 @@ end
 
 local function color_bits(bits)
     if bits < 128 then
-        return boldred .. bits .. reset;
+        return outputmanager.boldred .. bits .. outputmanager.reset;
     elseif bits < 256 then
-        return green .. bits .. reset;
+        return outputmanager.green .. bits .. outputmanager.reset;
     else
-        return boldgreen .. bits .. reset;
+        return outputmanager.boldgreen .. bits .. outputmanager.reset;
     end
 end
 
@@ -547,88 +464,82 @@ local function pretty_cipher(info)
     local judgement = ""
 
     if info.bits < 128 then
-        judgement = boldred .. " WEAK!" .. reset
+        judgement = outputmanager.boldred .. " WEAK!" .. outputmanager.reset
     end
 
     if info.cipher:find("ECDHE-") == 1 or info.cipher:find("DHE-") == 1 then
-        judgement = judgement .. boldblue .. " FS" .. reset
+        judgement = judgement .. outputmanager.boldblue .. " FS" .. outputmanager.reset
     end
 
-    return info.protocol .. " " .. info.cipher .. " (" .. color_bits(info.bits) .. ") " .. string.format("0x%02X", ciphertable.find(info.cipher)) .. judgement;
+    return info.cipher .. " (" .. color_bits(info.bits) .. ") " .. string.format("0x%02X", ciphertable.find(info.cipher)) .. judgement;
 end
 
 local function print_cipher_result(info, err)
     if err then
-        print(red .. "Fail: " .. err .. reset);
+        outputmanager.print(outputmanager.red .. "Fail: " .. err .. outputmanager.reset);
     else
-        print("OK: " .. pretty_cipher(info));
+        outputmanager.print("OK: " .. pretty_cipher(info));
     end
 end
 
 local function print_result(bad, info, err)
     if err then
-        if bad then print_no_nl(green); end
-        if not bad then print_no_nl(red); end
-        print("No." .. reset);
+        if bad then outputmanager.print_no_nl(outputmanager.green); end
+        if not bad then outputmanager.print_no_nl(outputmanager.red); end
+        outputmanager.print("No." .. outputmanager.reset);
         return false;
     else
-        if bad == true then print_no_nl(red); end
-        if bad == false then print_no_nl(green); end
-        print("Yes." .. reset);
+        if bad == true then outputmanager.print_no_nl(outputmanager.red); end
+        if bad == false then outputmanager.print_no_nl(outputmanager.green); end
+        outputmanager.print("Yes." .. outputmanager.reset);
         return true;
     end
 end
 
-function deepcopy(orig)
-    local orig_type = type(orig);
-    local copy;
-    if orig_type == 'table' then
-        copy = {};
-        for orig_key, orig_value in next, orig, nil do
-            copy[deepcopy(orig_key)] = deepcopy(orig_value);
-        end
-        setmetatable(copy, deepcopy(getmetatable(orig)));
-    else
-        copy = orig;
-    end
-    return copy;
-end
+local function test_server(target, port, co, tlsa_answer, srv_result_id)
+    total_score = 0;
+    fail_untrusted = false;
+    fail_ssl2 = false;
 
-co = coroutine.create(function ()
     local params;
 
-    test_cert();
+    test_cert(target, port, tlsa_answer, srv_result_id);
 
     coroutine.yield();
 
     if mode == "server" then
-        params = deepcopy(default_params);
+        params = deep_copy(default_params);
         params.key = nil;
         params.certificate = nil;
         params.protocol = "sslv23";
 
-        test_params(params);
+        test_params(target, port, params);
 
         local info, err = coroutine.yield();
 
         if not info then
-            print("Server " .. green .. "requires" .. reset .. " initiating server to present a certificate.");
+            outputmanager.print("Server " .. outputmanager.green .. "requires" .. outputmanager.reset .. " initiating server to present a certificate.");
+
+            local sth = assert(dbh:prepare("UPDATE srv_results SET requires_peer_cert = 1 WHERE srv_result_id = ?"));
+            assert(sth:execute(srv_result_id));
+
+            dbh:commit();
         else
-            print("Server does not require the initiating server to present a certificate.");
+            outputmanager.print("Server does not require the initiating server to present a certificate.");
         end
 
-        line();
+        outputmanager.line();
     end
 
     local protocols = {};
     local lowest_protocol, highest_protocol;
 
-    print("Testing protocol support:");
-    print_no_nl("Testing SSLv2 support... ");
+    outputmanager.print("Testing protocol support:");
+    outputmanager.print_no_nl("Testing SSLv2 support... ");
     params = default_params;
     params.options = {"no_sslv3"};
     params.protocol = "sslv2";
-    test_params(params);
+    test_params(target, port, params);
     if print_result(true, coroutine.yield()) then
         protocols[#protocols + 1] = "sslv2";
         lowest_protocol = 20;
@@ -636,59 +547,75 @@ co = coroutine.create(function ()
         fail_ssl2 = true;
     end
     
-    print_no_nl("Testing SSLv3 support... ");
+    outputmanager.print_no_nl("Testing SSLv3 support... ");
     
-    params = deepcopy(default_params);
+    params = deep_copy(default_params);
     params.options = {"no_sslv2"};
     params.protocol = "sslv3";
-    test_params(params);
+    test_params(target, port, params);
     if print_result(nil, coroutine.yield()) then
         protocols[#protocols + 1] = "sslv3";
         if not lowest_protocol then lowest_protocol = 80; end
         highest_protocol = 80;
     end
 
-    print_no_nl("Testing TLSv1 support... ");
-    params = deepcopy(default_params);
+    outputmanager.print_no_nl("Testing TLSv1 support... ");
+
+    params = deep_copy(default_params);
     params.options = {"no_sslv3"};
     params.protocol = "tlsv1";
-    test_params(params);
+    test_params(target, port, params);
     if print_result(nil, coroutine.yield()) then
         protocols[#protocols + 1] = "tlsv1";
         if not lowest_protocol then lowest_protocol = 90; end
         highest_protocol = 90;
     end
-   
-    print_no_nl("Testing TLSv1.1 support... ");
-    params = deepcopy(default_params);
+    
+    outputmanager.print_no_nl("Testing TLSv1.1 support... ");
+
+    params = deep_copy(default_params);
     params.options = {"no_sslv3","no_tlsv1"};
     params.protocol = "tlsv1_1";
-    test_params(params);
+    test_params(target, port, params);
     if print_result(false, coroutine.yield()) then
         protocols[#protocols + 1] = "tlsv1_1";
         if not lowest_protocol then lowest_protocol = 95; end
         highest_protocol = 95;
     end
 
-    print_no_nl("Testing TLSv1.2 support... ");
-    params = deepcopy(default_params);
+    outputmanager.print_no_nl("Testing TLSv1.2 support... ");
+
+    params = deep_copy(default_params);
     params.options = {"no_sslv3","no_tlsv1","no_tlsv1_1"};
     params.protocol = "tlsv1_2";
-    test_params(params);
+    test_params(target, port, params);
     if print_result(false, coroutine.yield()) then
         protocols[#protocols + 1] = "tlsv1_2";
         if not lowest_protocol then lowest_protocol = 100; end
         highest_protocol = 100;
     end
 
+    for k,v in ipairs(protocols) do
+        -- v can only be sslv2, sslv3, tlsv1, tlsv1_1 or tlsv1_2, so this is fine. Really.
+        local sth = assert(dbh:prepare("UPDATE srv_results SET " .. v .. " = 1 WHERE srv_result_id = ?"));
+        assert(sth:execute(srv_result_id));
+    end
+
+    dbh:commit();
+
     local protocol_score = (lowest_protocol + highest_protocol)/2;
 
-    print(green .. "Protocol score: " .. protocol_score .. reset);
+    outputmanager.print(outputmanager.green .. "Protocol score: " .. protocol_score .. outputmanager.reset);
+
+    local sth = assert(dbh:prepare("UPDATE srv_results SET protocol_score = ? WHERE srv_result_id = ?"));
+    assert(sth:execute(protocol_score, srv_result_id));
+
+    dbh:commit();
 
     total_score = total_score + 0.3 * protocol_score;
 
-    line();
-    print("Determining cipher support:");
+    outputmanager.line();
+    outputmanager.print("Determining cipher support:");
 
     local cipher_string = "ALL:COMPLEMENTOFALL";
     local ciphers = {};
@@ -696,10 +623,10 @@ co = coroutine.create(function ()
     for i=#protocols,1,-1 do
         local v = protocols[i];
         while true do
-            local params = deepcopy(default_params);
+            local params = deep_copy(default_params);
             params.protocol = v;
             params.ciphers = cipher_string;
-            test_params(params);
+            test_params(target, port, params);
 
             local info, err = coroutine.yield();
 
@@ -718,25 +645,30 @@ co = coroutine.create(function ()
         local cipher2 = ciphers[2];
         local protocol = protocols[#protocols];
 
-        local params = deepcopy(default_params);
+        local params = deep_copy(default_params);
         params.protocol = protocol;
         params.ciphers = cipher1.cipher .. ":" .. cipher2.cipher;
-        test_params(params);
+        test_params(target, port, params);
         local result1, err1 = coroutine.yield();
 
-        local params = deepcopy(default_params);
+        local params = deep_copy(default_params);
         params.protocol = protocol;
         params.ciphers = cipher2.cipher .. ":" .. cipher1.cipher;
-        test_params(params);
+        test_params(target, port, params);
         local result2, err2 = coroutine.yield();
 
         if not result1 or not result2 then
-            print(red .. "Problem with testing server's ordering. " .. tostring(err1) .. " " .. tostring(err2) .. reset);
+            outputmanager.print(outputmanager.red .. "Problem with testing server's ordering. " .. tostring(err1) .. " " .. tostring(err2) .. outputmanager.reset);
         elseif result1.cipher == result2.cipher then
-            print("Server does " .. red .. "not" .. reset .. " respect client's cipher ordering. Server's order:");
+            outputmanager.print("Server does " .. outputmanager.red .. "not" .. outputmanager.reset .. " respect client's cipher ordering. Server's order:");
             should_sort = false;
+
+            local sth = assert(dbh:prepare("UPDATE srv_results SET reorders_ciphers = 1 WHERE srv_result_id = ?"));
+            assert(sth:execute(srv_result_id));
+
+            dbh:commit();
         else
-            print("Server does respect client's cipher ordering.");
+            outputmanager.print("Server does respect client's cipher ordering.");
         end
     end
 
@@ -757,11 +689,17 @@ co = coroutine.create(function ()
     local max_bits = 0;
     local min_bits = math.huge;
 
+    local sth = assert(dbh:prepare("INSERT INTO srv_ciphers (srv_result_id, cipher_id, cipher_index) VALUES (?, ?, ?)"));
+
     for k,v in ipairs(ciphers) do
-        print(pretty_cipher(v));
+        assert(sth:execute(k - 1, srv_result_id, ciphertable.find(v.cipher)));
+
+        outputmanager.print(pretty_cipher(v));
         if v.bits < min_bits then min_bits = v.bits; end;
         if v.bits > max_bits then max_bits = v.bits; end;
     end
+
+    dbh:commit();
 
     local function cipher_score(bits)
         if bits == 0 then return 0 end
@@ -772,14 +710,19 @@ co = coroutine.create(function ()
 
     local cipher_score = (cipher_score(max_bits) + cipher_score(min_bits))/2;
 
-    print(green .. "Cipher score: " .. cipher_score .. reset);
+    outputmanager.print(outputmanager.green .. "Cipher score: " .. cipher_score .. outputmanager.reset);
 
     total_score = total_score + 0.4 * cipher_score;
+    
+    local sth = assert(dbh:prepare("UPDATE srv_results SET cipher_score = ? WHERE srv_result_id = ?"));
+    assert(sth:execute(cipher_score, srv_result_id));
+
+    dbh:commit();
 
     if mode == "client" then
 
-        line();
-        print("Estimating client cipher support:");
+        outputmanager.line();
+        outputmanager.print("Estimating client cipher support:");
 
         local clients = {
             { name = "Adium 1.5.7 on OS X 10.8"
@@ -831,10 +774,10 @@ co = coroutine.create(function ()
         };
 
         for _,client in ipairs(clients) do
-            print_no_nl(client.name .. ":");
+            outputmanager.print_no_nl(client.name .. ":");
 
             for i=0,75-#client.name do
-                print_no_nl(" ");
+                outputmanager.print_no_nl(" ");
             end
 
             local client_ciphers = {};
@@ -863,13 +806,12 @@ co = coroutine.create(function ()
             end
 
             if c == nil then
-                print(red .. "No common ciphers!" .. reset);
+                outputmanager.print(outputmanager.red .. "No common ciphers!" .. outputmanager.reset);
             else
-                print(pretty_cipher(c));
+                outputmanager.print(pretty_cipher(c));
             end
         end
     end
-
 
     local function grade(score)
         if score >= 80 then return "A"; end
@@ -880,33 +822,92 @@ co = coroutine.create(function ()
         return "F";
     end
 
-    line();
-    print(green .. "Total score: " .. total_score);
+    outputmanager.line();
+    outputmanager.print(outputmanager.green .. "Total score: " .. total_score);
     if fail_untrusted then
-        print(red .. "Grade: F (Untrusted certificate)" .. reset);
-        print(green .. "When ignoring trust: ");
+        outputmanager.print(outputmanager.red .. "Grade: F (Untrusted certificate)" .. outputmanager.reset);
+        outputmanager.print(outputmanager.green .. "When ignoring trust: ");
     end
     if fail_ssl2 then
-        print(red .. "Grade set to F due to support for obsolete and insecure SSLv2." .. reset);
+        outputmanager.print(outputmanager.red .. "Grade set to F due to support for obsolete and insecure SSLv2." .. outputmanager.reset);
     else
-        print("Grade: " .. grade(total_score) .. reset);
+        outputmanager.print("Grade: " .. grade(total_score) .. outputmanager.reset);
     end
 
-    local log = io.open("scores.log", "a");
+    local sth = assert(dbh:prepare("UPDATE srv_results SET total_score = ?, grade = ? WHERE srv_result_id = ?"));
+    assert(sth:execute(total_score, ((fail_untrusted or fail_ssl2) and "F") or grade(total_score), srv_result_id));
 
-    local score = grade(total_score);
+    dbh:commit();
 
-    if fail_untrusted or fail_ssl2 then
-        score = "F";
+    return nil;
+end
+
+co = coroutine.create(function ()
+    local f = adns.lookup(function (a) coroutine.resume(co, a) end, "_xmpp-" .. mode .. "._tcp." .. to_ascii(host), "SRV");
+    local srv_records = coroutine.yield();
+
+    outputmanager.print("DNS details:");
+
+    if srv_records.secure then
+        outputmanager.print("SRV records verified using " .. outputmanager.green .. "DNSSEC" .. outputmanager.reset .. ".");
+    elseif srv_records.bogus then
+        outputmanager.print("SRV records failed " .. outputmanager.red .. "DNSSEC" .. outputmanager.reset .. " validation.");
     end
 
-    log:write(host .. "\t" .. total_score .. "\t" .. score .. "\t" .. os.time() .. "\n");
+    outputmanager.print("SRV records:");
 
-    log:flush();
+    outputmanager.print(srv_records);
 
-    log:close();
+    outputmanager.line();
 
-    finish();
+    local stm = assert(dbh:prepare("INSERT INTO srv_results (test_id, priority, weight, port, target, sslv2, sslv3, tlsv1, tlsv1_1, tlsv1_2, reorders_ciphers, cipher_score, certificate_score, keysize_score, protocol_score, total_score, requires_peer_cert) " ..
+                                         "VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);"));
+    
+    for k,v in ipairs(srv_records) do
+        local srv = v.srv;
+        assert(stm:execute(result_id, srv.priority, srv.weight, srv.port, srv.target));
+        assert(last_insert_rowid:execute());
+
+        dbh:commit();
+
+        local srv_id = last_insert_rowid:fetch()[1];
+
+        outputmanager.print("Testing SRV record: " .. srv.priority .. " " .. srv.weight .. " " .. srv.port .. " " .. srv.target);
+
+        local tlsa = "_" .. srv.port .. "._tcp." .. srv.target;
+        local tlsa_supported = (not require("net.dns").types) or (require("net.dns").types[52] == "TLSA");
+        local tlsa_answer = nil;
+
+        if tlsa_supported then
+
+            outputmanager.print("TLSA records:");
+
+            local f = adns.lookup(function (a) coroutine.resume(co, a) end, tlsa, "TLSA");
+
+            tlsa_answer = coroutine.yield();
+
+            if tlsa_answer.secure then
+                outputmanager.print(outputmanager.green .. "DNSSEC secured" .. outputmanager.reset .. " TLSA records for " .. tlsa .. ":\n" .. tostring(tlsa_answer));
+            elseif tlsa_answer.bogus then
+                outputmanager.print(outputmanager.red .. "bogus" .. outputmanager.reset " TLSA records for " .. tlsa .. ":\n" .. tostring(tlsa_answer));
+            end
+
+            local stm = assert(dbh:prepare("INSERT INTO tlsa_records (srv_result_id, usage, selector, match, data) VALUES (?, ?, ?, ?, ?);"));
+
+            for l,w in ipairs(tlsa_answer) do
+                assert(stm:execute(srv_id, w.tlsa.use, w.tlsa.select, w.tlsa.match, w.tlsa.data));
+            end
+
+            dbh:commit();
+        else
+            outputmanager.print("No luaunbound support detected. Skipping TLSA records.");
+        end
+
+        test_server(srv.target, srv.port, co, tlsa_answer, srv_id);
+        outputmanager.line();
+    end
+
+    outputmanager.finish();
 
     os.exit();
 end)

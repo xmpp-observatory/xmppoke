@@ -7,12 +7,19 @@ Required:
 * Install squish from [http://matthewwild.co.uk/projects/squish/home](http://matthewwild.co.uk/projects/squish/home),
 * Build luasec from the xmppoke branch of [https://github.com/xnyhps/luasec/tree/xmppoke](https://github.com/xnyhps/luasec/tree/xmppoke),
 * Copy encodings.so and hashes.so from `util` in a [Prosody](https://prosody.im) build to `util/` in xmppoke.
+* Install luadbi (at least the sqlite3 driver).
 
 Then:
 
 `squish --use-http`
 
 to build xmppoke.lua.
+
+Use:
+
+`sqlite3 results.db < schema.sql`
+
+to initialize the database.
 
 ### Running
 

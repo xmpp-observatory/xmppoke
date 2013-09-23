@@ -49,5 +49,8 @@ end
 
 Module "3rdparty.date" "3rdparty/date.lua"
 
+Module "output" "output.lua"
+Module "certs" "certs.lua"
+
 -- Main verse file
 Main "poke.lua"
