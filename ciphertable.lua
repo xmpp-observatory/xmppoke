@@ -138,7 +138,7 @@ function M.parse_list_tls(str)
 	local result = "";
 
 	str:gsub("....", function (code)
-		local cipher = ciphers[tonumber("0x" .. code)];
+		local cipher = ciphers[tonumber(code, 16)];
 		if cipher then
 			if #result > 0 then
 				result = result .. ":";
@@ -157,7 +157,7 @@ function M.parse_list_ssl(str)
 	local result = "";
 
 	str:gsub("......", function (code)
-		local cipher = ciphers[tonumber("0x" .. code)];
+		local cipher = ciphers[tonumber(code, 16)];
 		if cipher then
 			if #result > 0 then
 				result = result .. ":";
