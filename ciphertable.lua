@@ -171,4 +171,12 @@ function M.parse_list_ssl(str)
 	return result;
 end
 
+if arg then
+	if arg[1] == "ssl" then
+		_G.print(M.parse_list_ssl(arg[2]));
+	elseif arg[1] == "tls" then
+		_G.print(M.parse_list_tls(arg[2]));
+	end
+end
+
 return M;
