@@ -125,6 +125,8 @@ local function execute_and_get_id(q, ...)
         dbh:commit();
 
         return last_insert_rowid:fetch()[1];
+    else
+        return {}
     end
 end
 
@@ -590,6 +592,16 @@ function test_params(target, port, params)
         end
     end);
 
+    verse.add_task(30, function ()
+        if not done then
+            c:debug("Handshake took 30 seconds. Giving up.");
+            done = true;
+            verse.add_task(sleep_for, function ()
+                coroutine.resume(co, nil, "Timeout");
+            end);
+        end
+    end);
+
     c:connect_client(jid);
 end
 
@@ -1014,10 +1026,9 @@ co = coroutine.create(function ()
             outputmanager.print(result);
 
             package.loaded["verse.client"] = nil;
-            -- package.loaded["verse"] = nil;
-
-            verse = require("verse").init(mode);
         end
+
+        verse = require("verse").init(mode);
 
         outputmanager.print("DNS details:");
 
