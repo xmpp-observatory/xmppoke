@@ -992,30 +992,32 @@ co = coroutine.create(function ()
         local f = adns.lookup(function (a) assert(pcall(function () print(a); coroutine.resume(co, a) end)) end, "_xmpp-" .. mode .. "._tcp." .. to_ascii(host), "SRV");
         local srv_records = coroutine.yield();
 
-        outputmanager.print_no_nl("Determining server version: ");
+        if version_jid and version_password then
+            outputmanager.print_no_nl("Determining server version: ");
 
-        local version = require("verse").init("client").new();
+            local version = require("verse").init("client").new();
 
-        version:add_plugin("version");
+            version:add_plugin("version");
 
-        version:connect_client(version_jid, version_password);
+            version:connect_client(version_jid, version_password);
 
-        version:hook("ready", function ()
-            version:query_version(host, function (v) coroutine.resume(co, (v.name or "unknown") .. " " .. (v.version or "unknown")); end);
-        end);
+            version:hook("ready", function ()
+                version:query_version(host, function (v) coroutine.resume(co, (v.name or "unknown") .. " " .. (v.version or "unknown")); end);
+            end);
 
-        local result = coroutine.yield();
+            local result = coroutine.yield();
 
-        local stm = assert(dbh:prepare("UPDATE test_results SET version = ? WHERE test_id = ?"));
+            local stm = assert(dbh:prepare("UPDATE test_results SET version = ? WHERE test_id = ?"));
 
-        assert(stm:execute(result, result_id));
+            assert(stm:execute(result, result_id));
 
-        outputmanager.print(result);
+            outputmanager.print(result);
 
-        package.loaded["verse.client"] = nil;
-        -- package.loaded["verse"] = nil;
+            package.loaded["verse.client"] = nil;
+            -- package.loaded["verse"] = nil;
 
-        verse = require("verse").init(mode);
+            verse = require("verse").init(mode);
+        end
 
         outputmanager.print("DNS details:");
 
