@@ -37,9 +37,13 @@ end
 
 function debian_weak_key(cert)
     local bits = cert:bits();
+    local modulus = cert:modulus();
+    
+    if not modulus then return nil end;
+
     local modulus_hash = hex(sha1("Modulus="..cert:modulus().."\n"));
 
-    local blacklist = openssl_blacklists and io.open(openssl_blacklists .. "/blacklist.RSA-" .. bits) or nil;
+    local blacklist = (openssl_blacklists and io.open(openssl_blacklists .. "/blacklist.RSA-" .. bits)) or nil;
 
     if blacklist then
         local found = false;
@@ -107,7 +111,7 @@ function pretty_cert(outputmanager, current_cert)
         outputmanager.print(outputmanager.boldred .. "Certificate is not yet valid." .. outputmanager.reset);
     end
     if now > notafter then
-        outputmanager.print(outputmanager.boldred .. "Certificate is outputmanager.expired." .. outputmanager.reset);
+        outputmanager.print(outputmanager.boldred .. "Certificate is expired." .. outputmanager.reset);
     end
 
     local crl_url = current_cert:crl();

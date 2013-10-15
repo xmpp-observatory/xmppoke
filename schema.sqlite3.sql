@@ -22,6 +22,8 @@ CREATE TABLE srv_results
 , compression TEXT
 , reorders_ciphers BOOLEAN
 , requires_peer_cert BOOLEAN
+, trusted BOOLEAN
+, valid_identity BOOLEAN
 , cipher_score INTEGER
 , certificate_score INTEGER
 , keysize_score INTEGER
@@ -53,10 +55,17 @@ CREATE TABLE certificates
 );
 
 CREATE TABLE srv_certificates
-( srv_result_id INTEGER
+( srv_certificates_id INTEGER PRIMARY KEY
+, srv_result_id INTEGER
 , certificate_id INTEGER
 , chain_index INTEGER
 );
+
+CREATE TABLE srv_certificate_errors
+( srv_certificates_id INTEGER
+, message TEXT
+);
+
 
 CREATE TABLE certificate_subjects
 ( certificate_subject_id INTEGER PRIMARY KEY ASC

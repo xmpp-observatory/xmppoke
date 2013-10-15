@@ -31,7 +31,7 @@ Module "verse.server" "server.lua"
 -- Verse plugins
 plugins = {
 	"tls", "sasl", "bind", "session", "legacy", "compression";
-	"presence", "private", "roster", "register";
+	"presence", "private", "roster", "register", "version";
 }
 
 AutoFetchURL "http://code.matthewwild.co.uk/verse/raw-file/34b878d58948/?"
