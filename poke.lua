@@ -260,7 +260,7 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
     local done = false;
 
     c.tlsparams = deep_copy(default_params);
-    c.tlsparams.protocol = "sslv3";
+    c.tlsparams.protocol = "sslv23";
 
     c.connect_host = target;
     c.connect_port = port;
