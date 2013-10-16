@@ -551,7 +551,8 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
         if not done then
             done = true;
             verse.add_task(sleep_for, function ()
-                coroutine.resume(co, nil, "Disconnected");
+                outputmanager.print(outputmanager.boldred .. "Failed to obtain the server's ceritficate! Is it an XMPP server?" .. outputmanager.reset);
+                os.exit();
             end);
         end
     end);
@@ -1106,6 +1107,11 @@ end)
 
 verse.add_task(0, function ()
     coroutine.resume(co);
+end);
+
+verse.add_task(30 * 60, function ()
+    outputmanager.print("Test is taking 30 minutes already. We're probably stuck.");
+    os.exit();
 end);
 
 verse.loop();
