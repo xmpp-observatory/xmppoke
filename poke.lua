@@ -82,6 +82,10 @@ if dbi and driver_name == "SQLite3" then
 
 elseif dbi and driver_name == "PostgreSQL" then
     dbh = assert(dbi.Connect(driver_name, "xmppoke", "xmppoke", db_password, "localhost", 5433));
+
+    local stm = assert(dbh:prepare("SET TIMEZONE = 'UTC';"));
+
+    assert(stm:execute());
 else
     local noop = function () end
     dbh = { execute = function () return {}; end
