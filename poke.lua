@@ -755,6 +755,9 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
         highest_protocol = 100;
     end
 
+    local sth = assert(dbh:prepare("UPDATE srv_results SET sslv2 = '0', sslv3 = '0', tlsv1 = '0', tlsv1_1 = '0', tlsv1_2 = '0' WHERE srv_result_id = ?;"));
+    assert(sth:execute(srv_result_id));
+
     for k,v in ipairs(protocols) do
         -- v can only be sslv2, sslv3, tlsv1, tlsv1_1 or tlsv1_2, so this is fine. Really.
         local sth = assert(dbh:prepare("UPDATE srv_results SET " .. v .. " = '1' WHERE srv_result_id = ?"));
@@ -1060,8 +1063,8 @@ co = coroutine.create(function ()
             srv_records = { { srv = { port = port, target = host } } };
         end
 
-        local q = "INSERT INTO srv_results (test_id, priority, weight, port, target, sslv2, sslv3, tlsv1, tlsv1_1, tlsv1_2, reorders_ciphers, cipher_score, certificate_score, keysize_score, protocol_score, total_score, requires_peer_cert, done, tlsa_dnssec_good, tlsa_dnssec_bogus) " ..
-                                             "VALUES (?, ?, ?, ?, ?, '0', '0', '0', '0', '0', '0', 0, 0, 0, 0, 0.0, '0', '0', ?, ?)";
+        local q = "INSERT INTO srv_results (test_id, priority, weight, port, target, reorders_ciphers, cipher_score, certificate_score, keysize_score, protocol_score, total_score, requires_peer_cert, done, tlsa_dnssec_good, tlsa_dnssec_bogus) " ..
+                                             "VALUES (?, ?, ?, ?, ?, '0', 0, 0, 0, 0, 0.0, '0', '0', ?, ?)";
         
         for k,v in ipairs(srv_records) do
             local srv = v.srv;
