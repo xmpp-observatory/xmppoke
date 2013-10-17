@@ -833,6 +833,11 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
             dbh:commit();
         else
+            local sth = assert(dbh:prepare("UPDATE srv_results SET reorders_ciphers = '0' WHERE srv_result_id = ?"));
+            assert(sth:execute(srv_result_id));
+
+            dbh:commit();
+
             outputmanager.print("Server does respect client's cipher ordering.");
         end
     end
@@ -1063,8 +1068,8 @@ co = coroutine.create(function ()
             srv_records = { { srv = { port = port, target = host } } };
         end
 
-        local q = "INSERT INTO srv_results (test_id, priority, weight, port, target, reorders_ciphers, cipher_score, certificate_score, keysize_score, protocol_score, total_score, requires_peer_cert, done, tlsa_dnssec_good, tlsa_dnssec_bogus) " ..
-                                             "VALUES (?, ?, ?, ?, ?, '0', 0, 0, 0, 0, 0.0, '0', '0', ?, ?)";
+        local q = "INSERT INTO srv_results (test_id, priority, weight, port, target, cipher_score, certificate_score, keysize_score, protocol_score, total_score, requires_peer_cert, done, tlsa_dnssec_good, tlsa_dnssec_bogus) " ..
+                                             "VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0.0, '0', '0', ?, ?)";
         
         for k,v in ipairs(srv_records) do
             local srv = v.srv;
