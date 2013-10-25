@@ -120,6 +120,7 @@ CREATE TABLE public_servers
 , founded INTEGER
 , country TEXT
 , url TEXT
+, description TEXT
 );
 
 INSERT INTO "ciphers" VALUES(1,'NULL-MD5','TLS_RSA_WITH_NULL_MD5',0,'RSA','RSA','None','MD5',FALSE,FALSE,'SSLv3');
