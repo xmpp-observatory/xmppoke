@@ -81,7 +81,7 @@ if dbi and driver_name == "SQLite3" then
     last_insert_rowid = assert(dbh:prepare("SELECT last_insert_rowid() AS li"));
 
 elseif dbi and driver_name == "PostgreSQL" then
-    dbh = assert(dbi.Connect(driver_name, "xmppoke", "xmppoke", db_password, "localhost", 5433));
+    dbh = assert(dbi.Connect(driver_name, "xmppoke", "xmppoke", db_password, "localhost", 5432));
 
     local stm = assert(dbh:prepare("SET TIMEZONE = 'UTC';"));
 
@@ -1026,8 +1026,24 @@ co = coroutine.create(function ()
 
             version:connect_client(version_jid, version_password);
 
+            local done = false;
+
             version:hook("ready", function ()
-                version:query_version(host, function (v) coroutine.resume(co, (v.name or "unknown") .. " " .. (v.version or "unknown")); end);
+                version:query_version(host, function (v)
+                        if not done then
+                            coroutine.resume(co, (v.name or "unknown") .. " " .. (v.version or "unknown"));
+                            version:close();
+                            done = true;
+                        end
+                end);
+            end);
+
+            verse.add_task(15, function ()
+                if not done then
+                    coroutine.resume(co);
+                    version:close();
+                    done = true;
+                end
             end);
 
             local result = coroutine.yield();
