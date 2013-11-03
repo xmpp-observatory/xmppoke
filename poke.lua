@@ -282,7 +282,9 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
             outputmanager.print("Server " .. outputmanager.red .. "allows" .. outputmanager.reset .. " starttls.");
         else
             outputmanager.print(outputmanager.boldred .. "Server does not offer starttls!" .. outputmanager.reset);
-            os.exit();
+            verse.add_task(sleep_for, function ()
+                coroutine.resume(co, false);
+            end);
         end
     end, 1000);
 
@@ -297,7 +299,9 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
 
                 outputmanager.line();
                 finish();
-                os.exit();
+                verse.add_task(sleep_for, function ()
+                    coroutine.resume(co, false);
+                end);
             end
 
             outputmanager.line();
@@ -556,7 +560,9 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
             done = true;
             verse.add_task(sleep_for, function ()
                 outputmanager.print(outputmanager.boldred .. "Failed to obtain the server's ceritficate! Is it an XMPP server?" .. outputmanager.reset);
-                os.exit();
+                verse.add_task(sleep_for, function ()
+                    coroutine.resume(co, false);
+                end);
             end);
         end
     end);
@@ -665,7 +671,9 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
     test_cert(target, port, tlsa_answer, srv_result_id);
 
-    coroutine.yield();
+    if coroutine.yield() == false then
+        return
+    end
 
     if mode == "server" then
         params = deep_copy(default_params);
