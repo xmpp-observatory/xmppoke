@@ -531,13 +531,13 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
             outputmanager.print(outputmanager.green .. "Certificate score: " .. certificate_score .. outputmanager.reset);
             outputmanager.print(outputmanager.green .. "Key exchange score: " .. keysize_score(cert:bits()) .. outputmanager.reset);
 
-            total_score = total_score + 0.3 * keysize_score(cert:bits());
+            public_key_score = keysize_score(cert:bits());
 
             outputmanager.line();
             outputmanager.print("Compression: " .. (conn:info("compression") or "none"));
             
-            local sth = assert(dbh:prepare("UPDATE srv_results SET compression = ?, keysize_score = ?, certificate_score = ?, valid_identity = ?, trusted = ? WHERE srv_result_id = ?"));
-            assert(sth:execute(conn:info("compression"), keysize_score(cert:bits()), certificate_score, valid_identity, chain_valid, srv_result_id));
+            local sth = assert(dbh:prepare("UPDATE srv_results SET compression = ?, certificate_score = ?, valid_identity = ?, trusted = ? WHERE srv_result_id = ?"));
+            assert(sth:execute(conn:info("compression"), certificate_score, valid_identity, chain_valid, srv_result_id));
 
             dbh:commit();
 
@@ -664,6 +664,7 @@ end
 
 local function test_server(target, port, co, tlsa_answer, srv_result_id)
     total_score = 0;
+    public_key_score = 0;
     fail_untrusted = false;
     fail_ssl2 = false;
 
@@ -790,6 +791,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
     local cipher_string = "ALL:COMPLEMENTOFALL";
     local ciphers = {};
+    local cipher_key_score_override = nil;
 
     for i=#protocols,1,-1 do
         local v = protocols[i];
@@ -808,8 +810,29 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
             print(cipher_string, info.cipher);
 
             cipher_string = cipher_string .. ":!" .. info.cipher;
+
+            if info.export and not cipher_key_score_override then
+                outputmanager.print(outputmanager.red .. "Server supports EXPORT cipher, key exchange score capped to 40." .. outputmanager.reset);
+                cipher_key_score_override = 40;
+            end
+
+            if info.authentication == "None" then
+                outputmanager.print(outputmanager.red .. "Server supports ADH cipher, key exchange score capped to 0." .. outputmanager.reset);
+                cipher_key_score_override = 0;
+            end
        end
     end
+
+    if cipher_key_score_override and cipher_key_score_override < public_key_score then
+        public_key_score = cipher_key_score_override;
+    end
+
+    local sth = assert(dbh:prepare("UPDATE srv_results SET keysize_score = ? WHERE srv_result_id = ?"));
+    assert(sth:execute(public_key_score, srv_result_id, cipher_key_score_override));
+
+    dbh:commit();
+
+    total_score = total_score + 0.3 * public_key_score;
 
     local should_sort = true;
 
