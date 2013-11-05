@@ -141,6 +141,7 @@ if opts.verbose then
 end
 
 local total_score = 0;
+local public_key_score = 0;
 local fail_untrusted = false;
 local fail_ssl2 = false;
 
@@ -529,7 +530,6 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
             outputmanager.line();
 
             outputmanager.print(outputmanager.green .. "Certificate score: " .. certificate_score .. outputmanager.reset);
-            outputmanager.print(outputmanager.green .. "Key exchange score: " .. keysize_score(cert:bits()) .. outputmanager.reset);
 
             public_key_score = keysize_score(cert:bits());
 
@@ -828,9 +828,11 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
     end
 
     local sth = assert(dbh:prepare("UPDATE srv_results SET keysize_score = ? WHERE srv_result_id = ?"));
-    assert(sth:execute(public_key_score, srv_result_id, cipher_key_score_override));
+    assert(sth:execute(public_key_score, srv_result_id));
 
     dbh:commit();
+    
+    outputmanager.print(outputmanager.green .. "Key exchange score: " .. public_key_score .. outputmanager.reset);
 
     total_score = total_score + 0.3 * public_key_score;
 
