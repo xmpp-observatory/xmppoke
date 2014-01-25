@@ -1091,7 +1091,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
     outputmanager.print("Grade: " .. final_grade  .. outputmanager.reset);
 
     local sth = assert(dbh:prepare("UPDATE srv_results SET total_score = ?, grade = ?, done = '1', warn_rc4_tls11 = ? WHERE srv_result_id = ?"));
-    assert(sth:execute(total_score, final_grade, srv_result_id, warn_rc4_tls11));
+    assert(sth:execute(total_score, final_grade, warn_rc4_tls11, srv_result_id));
 
     dbh:commit();
 
