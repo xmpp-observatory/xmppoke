@@ -768,9 +768,9 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
     if mode == "client" then
         test_sasl(target, port, srv_result_id);
-    end
 
-    coroutine.yield()
+        coroutine.yield();
+    end
 
     if mode == "server" then
         params = deep_copy(default_params);
