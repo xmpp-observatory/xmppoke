@@ -289,7 +289,7 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
             outputmanager.print("Server " .. outputmanager.red .. "allows" .. outputmanager.reset .. " starttls.");
         else
             outputmanager.print(outputmanager.boldred .. "Server does not offer starttls!" .. outputmanager.reset);
-            local sth = assert(dbh:prepare("UPDATE srv_results SET error = ? WHERE srv_result_id = ?"));
+            local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ?"));
             assert(sth:execute("Server does not support encryption.", srv_result_id));
             verse.add_task(sleep_for, function ()
                 coroutine.resume(co, false);
@@ -579,7 +579,7 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
             verse.add_task(sleep_for, function ()
                 outputmanager.print(outputmanager.boldred .. "Failed to obtain the server's ceritficate! Is it an XMPP server?" .. outputmanager.reset);
 
-                local sth = assert(dbh:prepare("UPDATE srv_results SET error = ? WHERE srv_result_id = ?"));
+                local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ?"));
                 assert(sth:execute("Connection failed.", srv_result_id));
 
                 verse.add_task(sleep_for, function ()
