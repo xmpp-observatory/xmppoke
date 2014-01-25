@@ -8,6 +8,7 @@ CREATE TABLE test_results
 , version TEXT
 , srv_dnssec_good BOOLEAN
 , srv_dnssec_bogus BOOLEAN
+, error TEXT
 );
 
 CREATE TABLE srv_results
@@ -40,6 +41,7 @@ CREATE TABLE srv_results
 , a_aaaa_dnssec_good BOOLEAN
 , a_aaaa_dnssec_bogus BOOLEAN
 , warn_rc4_tls11 BOOLEAN
+, error TEXT
 );
 
 CREATE TABLE certificates
