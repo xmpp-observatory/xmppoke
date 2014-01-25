@@ -39,6 +39,7 @@ CREATE TABLE srv_results
 , tlsa_dnssec_bogus BOOLEAN
 , a_aaaa_dnssec_good BOOLEAN
 , a_aaaa_dnssec_bogus BOOLEAN
+, warn_rc4_tls11 BOOLEAN
 );
 
 CREATE TABLE certificates

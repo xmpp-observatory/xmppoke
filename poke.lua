@@ -69,7 +69,7 @@ local to_ascii = require "util.encodings".idna.to_ascii;
 local sha512 = require("util.hashes").sha512;
 local sha256 = require("util.hashes").sha256;
 
-local driver_name = "PostgreSQL";
+local driver_name = nil;
 
 outputmanager.init(opts.output, mode, host);
 
@@ -142,8 +142,13 @@ end
 
 local total_score = 0;
 local public_key_score = 0;
+
 local fail_untrusted = false;
 local fail_ssl2 = false;
+local fail_1024 = false;
+local fail_md5 = false;
+local cap_2048 = false;
+local warn_rc4_tls11 = false;
 
 local function deep_equal(a, b)
     if type(a) ~= type(b) then
@@ -261,6 +266,7 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
     local done = false;
 
     c.tlsparams = deep_copy(default_params);
+    c.tlsparams.options = {"no_sslv2"};
     c.tlsparams.protocol = "sslv23";
 
     c.connect_host = target;
@@ -383,6 +389,16 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
 
             if not valid_identity then
                 fail_untrusted = true;
+            end
+
+            if cert:bits() < 1024 then
+                fail_1024 = true;
+            elseif cert:bits() < 2048 then
+                cap_2048 = true;
+            end
+
+            if cert:signature_alg() == "md5WithRSAEncryption" then
+                fail_md5 = true;
             end
 
             outputmanager.line();
@@ -820,6 +836,10 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
                 outputmanager.print(outputmanager.red .. "Server supports ADH cipher, key exchange score capped to 0." .. outputmanager.reset);
                 cipher_key_score_override = 0;
             end
+
+            if info.encryption == "RC4(128)" and (v == "tslv1_1" or v == "tlsv1_2") then
+                warn_rc4_tls11 = true;
+            end
        end
     end
 
@@ -1027,18 +1047,51 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
     outputmanager.line();
     outputmanager.print(outputmanager.green .. "Total score: " .. total_score);
+
     if fail_untrusted then
         outputmanager.print(outputmanager.red .. "Grade: F (Untrusted certificate)" .. outputmanager.reset);
         outputmanager.print(outputmanager.green .. "When ignoring trust: ");
     end
+    
+    local final_grade = grade(total_score);
+
     if fail_ssl2 then
         outputmanager.print(outputmanager.red .. "Grade set to F due to support for obsolete and insecure SSLv2." .. outputmanager.reset);
-    else
-        outputmanager.print("Grade: " .. grade(total_score) .. outputmanager.reset);
+        final_grade = "F";
+    end
+    
+    if fail_1024 then
+        outputmanager.print(outputmanager.red .. "Grade set to F due to <1024 bit RSA key." .. outputmanager.reset);
+        final_grade = "F";
+    end
+    
+    if fail_md5 then
+        outputmanager.print(outputmanager.red .. "Grade set to F due to using a MD5 based signature." .. outputmanager.reset);
+        final_grade = "F";
     end
 
-    local sth = assert(dbh:prepare("UPDATE srv_results SET total_score = ?, grade = ?, done = '1' WHERE srv_result_id = ?"));
-    assert(sth:execute(total_score, ((fail_untrusted or fail_ssl2) and "F") or grade(total_score), srv_result_id));
+    if cap_2048 then
+        outputmanager.print(outputmanager.red .. "Grade capped to B due to <2048 bit RSA key." .. outputmanager.reset);
+        if final_grade == "A" then
+            final_grade = "B";
+        end
+    end
+
+    if not (highest_protocol == 100) then
+        outputmanager.print(outputmanager.red .. "Grade capped to B due to missing support for TLS 1.2." .. outputmanager.reset);
+        if final_grade == "A" then
+            final_grade = "B";
+        end
+    end
+
+    if warn_rc4_tls11 then
+        outputmanager.print(outputmanager.red .. "Warning: Server allows RC4 with TLS 1.1 and/or 1.2." .. outputmanager.reset);
+    end
+
+    outputmanager.print("Grade: " .. final_grade  .. outputmanager.reset);
+
+    local sth = assert(dbh:prepare("UPDATE srv_results SET total_score = ?, grade = ?, done = '1', warn_rc4_tls11 = ? WHERE srv_result_id = ?"));
+    assert(sth:execute(total_score, final_grade, srv_result_id, warn_rc4_tls11));
 
     dbh:commit();
 
@@ -1094,17 +1147,17 @@ co = coroutine.create(function ()
 
         outputmanager.print("DNS details:");
 
-        if srv_records.secure then
+        if srv_records and srv_records.secure then
             outputmanager.print("SRV records verified using " .. outputmanager.green .. "DNSSEC" .. outputmanager.reset .. ".");
-        elseif srv_records.bogus then
+        elseif srv_records and srv_records.bogus then
             outputmanager.print("SRV records failed " .. outputmanager.red .. "DNSSEC" .. outputmanager.reset .. " validation.");
         end
 
         local stm = assert(dbh:prepare("UPDATE test_results SET srv_dnssec_good = ?, srv_dnssec_bogus = ? WHERE test_id = ?"));
 
-        assert(stm:execute(srv_records.secure, srv_records.bogus, result_id));
+        assert(stm:execute(srv_records and srv_records.secure, srv_records and srv_records.bogus, result_id));
 
-        if #srv_records > 0 then
+        if srv_records and #srv_records > 0 then
             outputmanager.print("SRV records:");
 
             outputmanager.print(srv_records);
