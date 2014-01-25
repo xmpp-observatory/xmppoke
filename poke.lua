@@ -261,6 +261,74 @@ local function insert_cert(dbh, cert, srv_result_id, chain_index, errors)
     return cert_id;
 end
 
+function test_sasl(target, port, srv_result_id)
+    local c = verse.new();
+    local done = false;
+    local tls = false;
+
+    c.tlsparams = deep_copy(default_params);
+    c.tlsparams.protocol = "sslv23";
+
+    c.connect_host = target;
+    c.connect_port = port;
+
+    c:hook("incoming-raw", function (data) return c:debug("IN: " .. data); end);
+    c:hook("outgoing-raw", function (data) return c:debug("OUT: " .. data); end);
+
+    c:hook("stream-features", function (features_stanza)
+        if done then return end
+
+        c:debug("Features!");
+
+        local stanza = features_stanza:get_child("mechanisms", "urn:ietf:params:xml:ns:xmpp-sasl");
+
+        if not tls then
+            outputmanager.print("Pre-TLS SASL mechanisms:");
+        else
+            outputmanager.print("Post-TLS SASL mechanisms:");
+        end
+
+        if not stanza then
+            outputmanager.print("None");
+        else
+            for k,v in ipairs(stanza) do
+                outputmanager.print(v:get_text())
+
+                local sth = assert(dbh:prepare("INSERT INTO srv_mechanisms (srv_result_id, mechanism, after_tls) VALUES (?, ?, ?)"));
+                assert(sth:execute(srv_result_id, v:get_text(), tls));
+            end
+        end
+
+        outputmanager.line();
+
+        if tls and not done then
+            done = true;
+            c.conn:socket():close();
+            verse.add_task(sleep_for, function ()
+                coroutine.resume(co);
+            end);
+        end
+    end, 1000);
+
+    verse.add_task(30, function ()
+        if not done then
+            c:debug("Handshake took 30 seconds. Giving up.");
+            done = true;
+            verse.add_task(sleep_for, function ()
+                coroutine.resume(co, nil, "Timeout");
+            end);
+        end
+    end);
+
+    c:hook("status", function (status)
+        if status == "ssl-handshake-complete" and not done then
+            tls = true;
+        end
+    end);
+
+    c:connect_client(jid);
+end
+
 function test_cert(target, port, tlsa_answer, srv_result_id)
     local c = verse.new();
     local done = false;
@@ -697,6 +765,12 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
     if coroutine.yield() == false then
         return
     end
+
+    if mode == "client" then
+        test_sasl(target, port, srv_result_id);
+    end
+
+    coroutine.yield()
 
     if mode == "server" then
         params = deep_copy(default_params);

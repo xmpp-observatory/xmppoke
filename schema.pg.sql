@@ -370,3 +370,17 @@ INSERT INTO "public_servers" (server_name, founded, country) VALUES ('xmpp.ru.ne
 INSERT INTO "public_servers" (server_name, founded, country) VALUES ('xmppnet.de', 2003, 'DE');
 INSERT INTO "public_servers" (server_name, founded, country) VALUES ('zauris.ru', 2011, 'RU');
 INSERT INTO "public_servers" (server_name, founded, country) VALUES ('zsim.de', 2009, 'DE');
+
+CREATE TABLE news_posts
+( post_id SERIAL UNIQUE
+, post_date TIMESTAMP
+, message TEXT
+, title TEXT
+);
+
+CREATE TABLE srv_mechanisms
+( srv_mechanisms_id SERIAL UNIQUE
+, srv_result_id INTEGER REFERENCES srv_results(srv_result_id)
+, mechanism TEXT
+, after_tls BOOLEAN
+);
