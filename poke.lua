@@ -56,6 +56,7 @@ local ciphertable = require("ciphertable");
 local adns = require("net.adns");
 local outputmanager = require("output")(use_html and "html" or "ansi");
 local certmanager = require("certs")(openssl_blacklists);
+local onions = require "onions";
 
 local dbi = nil;
 
@@ -272,6 +273,12 @@ function test_sasl(target, port, srv_result_id)
     c.connect_host = target;
     c.connect_port = port;
 
+    if target:find(".onion(.?)$") then
+        c.connect = function (session, host, port)
+            return onions.connect_socks5(session, host, port);
+        end
+    end
+
     c:hook("incoming-raw", function (data) return c:debug("IN: " .. data); end);
     c:hook("outgoing-raw", function (data) return c:debug("OUT: " .. data); end);
 
@@ -339,6 +346,12 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
 
     c.connect_host = target;
     c.connect_port = port;
+
+    if target:find(".onion(.?)$") then
+        c.connect = function (session, host, port)
+            return onions.connect_socks5(session, host, port);
+        end
+    end
 
     c:hook("outgoing-raw", function (data) return c:debug("OUT: " .. data); end);
     c:hook("incoming-raw", function (data) return c:debug("IN: " .. data); end);
@@ -667,6 +680,12 @@ function test_params(target, port, params)
     c.tlsparams = params;
     c.connect_host = target;
     c.connect_port = port;
+
+    if target:find(".onion(.?)$") then
+        c.connect = function (session, host, port)
+            return onions.connect_socks5(session, host, port);
+        end
+    end
 
     c:hook("status", function (status)
         if status == "ssl-handshake-complete" and not done then
