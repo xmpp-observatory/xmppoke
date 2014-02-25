@@ -29,11 +29,11 @@ CREATE TABLE srv_results
 , requires_peer_cert BOOLEAN
 , trusted BOOLEAN
 , valid_identity BOOLEAN
-, cipher_score INTEGER
-, certificate_score INTEGER
-, keysize_score INTEGER
-, protocol_score INTEGER
-, total_score REAL
+, cipher_score DECIMAL(7,4)
+, certificate_score DECIMAL(7,4)
+, keysize_score DECIMAL(7,4)
+, protocol_score DECIMAL(7,4)
+, total_score DECIMAL(7,4)
 , grade TEXT
 , done BOOLEAN
 , tlsa_dnssec_good BOOLEAN
