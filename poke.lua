@@ -303,6 +303,8 @@ function test_sasl(target, port, srv_result_id)
 
                 local sth = assert(dbh:prepare("INSERT INTO srv_mechanisms (srv_result_id, mechanism, after_tls) VALUES (?, ?, ?)"));
                 assert(sth:execute(srv_result_id, v:get_text(), tls));
+
+                dbh:commit();
             end
         end
 
