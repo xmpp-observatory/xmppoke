@@ -374,11 +374,22 @@ function test_cert(target, port, tlsa_answer, srv_result_id)
             outputmanager.print(outputmanager.boldred .. "Server does not offer starttls!" .. outputmanager.reset);
             local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ?"));
             assert(sth:execute("Server does not support encryption.", srv_result_id));
+            dbh:commit();
             verse.add_task(sleep_for, function ()
                 coroutine.resume(co, false);
             end);
         end
     end, 1000);
+
+    c:hook("stream-error", function(event)
+        if event:get_child("host-unknown", "urn:ietf:params:xml:ns:xmpp-streams") then
+            local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ?"));
+            assert(sth:execute("This server does not serve " .. jid  .. ".", srv_result_id));
+            dbh:commit();
+            c:close();
+            return true;
+        end
+    end, 1000)
 
     c:hook("status", function (status)
         if status == "ssl-handshake-complete" and not done then
