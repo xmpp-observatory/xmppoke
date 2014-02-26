@@ -582,7 +582,7 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
 
     c:hook("stream-error", function(event)
         if event:get_child("host-unknown", "urn:ietf:params:xml:ns:xmpp-streams") then
-            local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ?"));
+            local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ? AND error IS NULL"));
             assert(sth:execute("This server does not serve " .. jid  .. ".", srv_result_id));
             dbh:commit();
             outputmanager.print(outputmanager.red .. "This server does not serve " .. jid  .. "." .. outputmanager.reset);
@@ -633,7 +633,7 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
         else
             if not features_done then
                 outputmanager.print(outputmanager.boldred .. "Server does not offer starttls!" .. outputmanager.reset);
-                local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ?"));
+                local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ? AND error IS NULL"));
                 assert(sth:execute("Server does not support encryption.", srv_result_id));
                 dbh:commit();
 
@@ -841,7 +841,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
     if #protocols == 0 then
         outputmanager.print(outputmanager.red .. "No SSL or TLS support detected." .. outputmanager.reset);
 
-        local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ?"));
+        local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ? AND error IS NULL"));
         assert(sth:execute("Connection failed.", srv_result_id));
         dbh:commit();
 
