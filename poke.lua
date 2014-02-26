@@ -262,30 +262,11 @@ local function insert_cert(dbh, cert, srv_result_id, chain_index, errors)
     return cert_id;
 end
 
-function test_sasl(target, port, srv_result_id)
-    local c = verse.new();
-    local done = false;
-    local tls = false;
+local sasl_done = false;
+local sasl_tls_done = false;
 
-    c.tlsparams = deep_copy(default_params);
-    c.tlsparams.protocol = "sslv23";
-
-    c.connect_host = target;
-    c.connect_port = port;
-
-    if target:find(".onion(.?)$") then
-        c.connect = function (session, host, port)
-            return onions.connect_socks5(session, host, port);
-        end
-    end
-
-    c:hook("incoming-raw", function (data) return c:debug("IN: " .. data); end);
-    c:hook("outgoing-raw", function (data) return c:debug("OUT: " .. data); end);
-
-    c:hook("stream-features", function (features_stanza)
-        if done then return end
-
-        c:debug("Features!");
+function got_sasl(srv_result_id, features_stanza, tls)
+    if (tls and not sasl_tls_done) or (not tls and not sasl_done) then
 
         local stanza = features_stanza:get_child("mechanisms", "urn:ietf:params:xml:ns:xmpp-sasl");
 
@@ -310,383 +291,279 @@ function test_sasl(target, port, srv_result_id)
 
         outputmanager.line();
 
-        if tls and not done then
-            done = true;
-            c.conn:socket():close();
-            verse.add_task(sleep_for, function ()
-                coroutine.resume(co);
-            end);
-        end
-    end, 1000);
-
-    verse.add_task(30, function ()
-        if not done then
-            c:debug("Handshake took 30 seconds. Giving up.");
-            done = true;
-            verse.add_task(sleep_for, function ()
-                coroutine.resume(co, nil, "Timeout");
-            end);
-        end
-    end);
-
-    c:hook("status", function (status)
-        if status == "ssl-handshake-complete" and not done then
-            tls = true;
-        end
-    end);
-
-    c:connect_client(jid);
-end
-
-function test_cert(target, port, tlsa_answer, srv_result_id)
-    local c = verse.new();
-    local done = false;
-
-    c.tlsparams = deep_copy(default_params);
-    c.tlsparams.options = {"no_sslv2"};
-    c.tlsparams.protocol = "sslv23";
-
-    c.connect_host = target;
-    c.connect_port = port;
-
-    if target:find(".onion(.?)$") then
-        c.connect = function (session, host, port)
-            return onions.connect_socks5(session, host, port);
+        if tls then
+            sasl_tls_done = true;
+        else
+            sasl_done = true;
         end
     end
+end
 
-    c:hook("outgoing-raw", function (data) return c:debug("OUT: " .. data); end);
-    c:hook("incoming-raw", function (data) return c:debug("IN: " .. data); end);
+local cert_done = false;
 
-    c:hook("stream-features", function (features_stanza)
-        local stanza = features_stanza:get_child("starttls", "urn:ietf:params:xml:ns:xmpp-tls");
+function got_cert(c, tlsa_answer, srv_result_id)
+    if not cert_done then
+        local conn = c.conn:socket();
 
-        local sth = assert(dbh:prepare("UPDATE srv_results SET requires_starttls = ? WHERE srv_result_id = ?"));
-        assert(sth:execute(stanza and stanza:get_child("required") ~= nil, srv_result_id));
-
-        dbh:commit();
-
-        if stanza and stanza:get_child("required") then
-            outputmanager.print("Server " .. outputmanager.green .. "requires" .. outputmanager.reset .. " starttls.");
-        elseif stanza then
-            outputmanager.print("Server " .. outputmanager.red .. "allows" .. outputmanager.reset .. " starttls.");
-        else
-            outputmanager.print(outputmanager.boldred .. "Server does not offer starttls!" .. outputmanager.reset);
-            local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ?"));
-            assert(sth:execute("Server does not support encryption.", srv_result_id));
-            dbh:commit();
-            verse.add_task(sleep_for, function ()
-                coroutine.resume(co, false);
-            end);
+        if not conn.getpeercertificate then
+            return;
         end
-    end, 1000);
 
-    c:hook("stream-error", function(event)
-        if event:get_child("host-unknown", "urn:ietf:params:xml:ns:xmpp-streams") then
-            local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ?"));
-            assert(sth:execute("This server does not serve " .. jid  .. ".", srv_result_id));
-            dbh:commit();
-            c:close();
-            return true;
-        end
-    end, 1000)
+        outputmanager.line();
 
-    c:hook("status", function (status)
-        if status == "ssl-handshake-complete" and not done then
-            local conn = c.conn:socket();
+        local cert = conn:getpeercertificate();
+        local chain_valid, errors = conn:getpeerverification();
 
-            if not conn.getpeercertificate then
-                outputmanager.line();
+        if tlsa_answer then
 
-                outputmanager.print(outputmanager.boldred .. "No TLS support detected!" .. outputmanager.reset);
+            outputmanager.print("TLSA verification results:");
 
-                outputmanager.line();
-                finish();
-                verse.add_task(sleep_for, function ()
-                    coroutine.resume(co, false);
-                end);
+            local matches = { [0] = function (c) return hex(c:der()) end, function (c) return c:digest("sha256") end, function (c) return c:digest("sha512") end }
+            local matches_spki = { [0] = hex, function (c) return hex(sha256(c)) end, function (c) return hex(sha512(c)) end }
+
+            for k,v in ipairs(tlsa_answer) do
+                v.tlsa.found = false;
+                if v.tlsa.use == 1 or v.tlsa.use == 3 then
+                    if v.tlsa.select == 0 then
+                        if matches[v.tlsa.match] and (matches[v.tlsa.match](cert) == hex(v.tlsa.data)) then
+                            v.tlsa.found = v.tlsa.use == 3 or chain_valid;
+                        end
+                    elseif v.tlsa.select == 1 then
+                        if matches_spki[v.tlsa.match] and (matches_spki[v.tlsa.match](cert:spki()) == hex(v.tlsa.data)) then
+                            v.tlsa.found = v.tlsa.use == 3 or chain_valid;
+                        end
+                    end
+                elseif v.tlsa.use == 0 or v.tlsa.use == 2 then
+                    local i = 2;
+
+                    while true do
+                        local cert = conn:getpeercertificate(i);
+
+                        if not cert then break end;
+
+                        if v.tlsa.select == 0 then
+                            if matches[v.tlsa.match] and (matches[v.tlsa.match](cert) == hex(v.tlsa.data)) then
+                                v.tlsa.found = v.tlsa.use == 2 or chain_valid;
+                            end
+                        elseif v.tlsa.select == 1 then
+                            if matches_spki[v.tlsa.match] and (matches_spki[v.tlsa.match](cert) == hex(v.tlsa.data)) then
+                                v.tlsa.found = v.tlsa.use == 2 or chain_valid;
+                            end
+                        end
+
+                        i = i + 1;
+                    end
+                end
             end
+
+            local stm = assert(dbh:prepare("INSERT INTO tlsa_records (srv_result_id, usage, selector, match, data, verified) VALUES (?, ?, ?, ?, ?, ?)"));
+
+            for k,v in ipairs(tlsa_answer) do
+                outputmanager.print_no_nl((v.tlsa.found and (outputmanager.green .. "Success") or (outputmanager.red .. "Fail")) .. outputmanager.reset .. ": ");
+                outputmanager.print_no_nl(v.tlsa:getUsage() .. " " .. v.tlsa:getSelector() .. " " .. v.tlsa:getMatchType() .. " (");
+                outputmanager.print(((v.tlsa.match == 1 or v.tlsa.match == 2) and certmanager.pretty_fingerprint(hex(v.tlsa.data)) or (hex(v.tlsa.data:sub(1, 64)) .. "...")) .. ").");
+
+                assert(stm:execute(srv_result_id, v.tlsa.use, v.tlsa.select, v.tlsa.match, hex(v.tlsa.data), v.tlsa.found == true));
+            end
+
+            dbh:commit();
+
+            outputmanager.line();
+        end
+
+        outputmanager.print("Certificate details:");
+        
+        local chain_valid, errors = conn:getpeerverification();
+        local valid_identity = cert_verify_identity(host, "xmpp-"..mode, cert);
+        outputmanager.print("Valid for "..host..": "..(valid_identity and "Yes" or outputmanager.boldred .. "No" .. outputmanager.reset));
+
+        if chain_valid then
+            outputmanager.print("Trusted certificate: Yes");
+        else
+            outputmanager.print("Trusted certificate: " .. outputmanager.red .. "No" .. outputmanager.reset);
+            certmanager.print_errors(outputmanager.print, errors);
+            fail_untrusted = true;
+        end
+
+        if not valid_identity then
+            fail_untrusted = true;
+        end
+
+        if cert:bits() < 1024 then
+            fail_1024 = true;
+        elseif cert:bits() < 2048 then
+            cap_2048 = true;
+        end
+
+        if cert:signature_alg() == "md5WithRSAEncryption" then
+            fail_md5 = true;
+        end
+
+        outputmanager.line();
+        outputmanager.print("Certificate chain:");
+
+        local certs = conn:getpeerchain();
+        local current_cert = cert;
+        local used_certs = {};
+        local chain = {};
+
+        local i = 1;
+
+        while true do
+
+            used_certs[i] = true;
 
             outputmanager.line();
 
-            local cert = conn:getpeercertificate();
-            local chain_valid, errors = conn:getpeerverification();
+            outputmanager.print(i-1 .. ":");
 
-            if tlsa_answer then
+            pretty_cert(outputmanager, current_cert);
+            local cert_id = insert_cert(dbh, current_cert, srv_result_id, i - 1, errors and errors[i] or {});
 
-                outputmanager.print("TLSA verification results:");
+            chain[#chain + 1] = cert_id;
 
-                local matches = { [0] = function (c) return hex(c:der()) end, function (c) return c:digest("sha256") end, function (c) return c:digest("sha512") end }
-                local matches_spki = { [0] = hex, function (c) return hex(sha256(c)) end, function (c) return hex(sha512(c)) end }
+            if #chain > 1 then
+                local stm = assert(dbh:prepare("UPDATE certificates SET signed_by_id = ? WHERE certificate_id = ?"));
 
-                for k,v in ipairs(tlsa_answer) do
-                    v.tlsa.found = false;
-                    if v.tlsa.use == 1 or v.tlsa.use == 3 then
-                        if v.tlsa.select == 0 then
-                            if matches[v.tlsa.match] and (matches[v.tlsa.match](cert) == hex(v.tlsa.data)) then
-                                v.tlsa.found = v.tlsa.use == 3 or chain_valid;
-                            end
-                        elseif v.tlsa.select == 1 then
-                            if matches_spki[v.tlsa.match] and (matches_spki[v.tlsa.match](cert:spki()) == hex(v.tlsa.data)) then
-                                v.tlsa.found = v.tlsa.use == 3 or chain_valid;
-                            end
-                        end
-                    elseif v.tlsa.use == 0 or v.tlsa.use == 2 then
-                        local i = 2;
+                assert(stm:execute(cert_id, chain[#chain - 1]));
 
-                        while true do
-                            local cert = conn:getpeercertificate(i);
+                dbh:commit();
+            end
 
-                            if not cert then break end;
+            local new_cert = nil;
+            i = nil;
 
-                            if v.tlsa.select == 0 then
-                                if matches[v.tlsa.match] and (matches[v.tlsa.match](cert) == hex(v.tlsa.data)) then
-                                    v.tlsa.found = v.tlsa.use == 2 or chain_valid;
-                                end
-                            elseif v.tlsa.select == 1 then
-                                if matches_spki[v.tlsa.match] and (matches_spki[v.tlsa.match](cert) == hex(v.tlsa.data)) then
-                                    v.tlsa.found = v.tlsa.use == 2 or chain_valid;
-                                end
-                            end
+            for k,v in ipairs(certs) do
+                local res, err = conn:did_issue(v, current_cert);
+                if res > 0 then
+                    new_cert = v;
+                    i = k;
+                    break;
+                end
+            end
 
-                            i = i + 1;
-                        end
+            if new_cert == nil then
+
+                -- Try to find it in the database before we give up.
+
+                local q = {};
+                local args = {}
+
+                for k,v in pairs(current_cert:issuer()) do
+                    q[#q + 1] = "SELECT certificate_id FROM certificate_subjects WHERE (name = ? AND value = ?)"
+                    args[#args + 1] = v.name;
+                    args[#args + 1] = v.value;
+                end
+
+                -- We know nothing. Too much to search through, we give up.
+                if #q == 0 then
+                    break;
+                end
+                
+                local query = table.concat(q, " INTERSECT ");
+
+                local stm = assert(dbh:prepare(query));
+
+                assert(stm:execute(unpack(args)));
+
+                local result = stm:fetch();
+
+                if not result then
+                    break
+                end
+
+                for k,v in pairs(result) do
+                    local stm = assert(dbh:prepare("SELECT pem FROM certificates WHERE certificate_id = ?"));
+
+                    assert(stm:execute(v));
+
+                    local pem = stm:fetch()[1];
+
+                    local candidate = cert_load(pem);
+
+                    if conn:did_issue(candidate, current_cert) then
+                        local stm = assert(dbh:prepare("UPDATE certificates SET signed_by_id = ? WHERE certificate_id = ?"));
+
+                        assert(stm:execute(v, cert_id));
+
+                        dbh:commit();
                     end
                 end
 
-                local stm = assert(dbh:prepare("INSERT INTO tlsa_records (srv_result_id, usage, selector, match, data, verified) VALUES (?, ?, ?, ?, ?, ?)"));
+                break
+            end;
 
-                for k,v in ipairs(tlsa_answer) do
-                    outputmanager.print_no_nl((v.tlsa.found and (outputmanager.green .. "Success") or (outputmanager.red .. "Fail")) .. outputmanager.reset .. ": ");
-                    outputmanager.print_no_nl(v.tlsa:getUsage() .. " " .. v.tlsa:getSelector() .. " " .. v.tlsa:getMatchType() .. " (");
-                    outputmanager.print(((v.tlsa.match == 1 or v.tlsa.match == 2) and certmanager.pretty_fingerprint(hex(v.tlsa.data)) or (hex(v.tlsa.data:sub(1, 64)) .. "...")) .. ").");
+            if new_cert:pem() == current_cert:pem() then
+                outputmanager.print("Self signed certificate.");
 
-                    assert(stm:execute(srv_result_id, v.tlsa.use, v.tlsa.select, v.tlsa.match, hex(v.tlsa.data), v.tlsa.found == true));
-                end
+                local stm = assert(dbh:prepare("UPDATE certificates SET signed_by_id = ? WHERE certificate_id = ?"));
+
+                assert(stm:execute(cert_id, cert_id));
 
                 dbh:commit();
 
+                break;
+            end
+
+            if used_certs[i] then
+                outputmanager.print(outputmanager.red .. "Certificate chain contains a cycle." .. outputmanager.reset);
+                break;
+            end
+
+            current_cert = new_cert;
+        end
+
+        outputmanager.line();
+
+        for k,v in ipairs(certs) do
+            if not used_certs[k] then
+                outputmanager.print(outputmanager.red .. "Found unused certificate in chain:" .. outputmanager.reset);
+                outputmanager.print(k-1 .. ":");
+
+                pretty_cert(outputmanager, v);
+                insert_cert(dbh, v, srv_result_id, k - 1, errors and errors[k] or {});
+
                 outputmanager.line();
             end
-
-            outputmanager.print("Certificate details:");
-            
-            local chain_valid, errors = conn:getpeerverification();
-            local valid_identity = cert_verify_identity(host, "xmpp-"..mode, cert);
-            outputmanager.print("Valid for "..host..": "..(valid_identity and "Yes" or outputmanager.boldred .. "No" .. outputmanager.reset));
-
-            if chain_valid then
-                outputmanager.print("Trusted certificate: Yes");
-            else
-                outputmanager.print("Trusted certificate: " .. outputmanager.red .. "No" .. outputmanager.reset);
-                certmanager.print_errors(outputmanager.print, errors);
-                fail_untrusted = true;
-            end
-
-            if not valid_identity then
-                fail_untrusted = true;
-            end
-
-            if cert:bits() < 1024 then
-                fail_1024 = true;
-            elseif cert:bits() < 2048 then
-                cap_2048 = true;
-            end
-
-            if cert:signature_alg() == "md5WithRSAEncryption" then
-                fail_md5 = true;
-            end
-
-            outputmanager.line();
-            outputmanager.print("Certificate chain:");
-
-            local certs = conn:getpeerchain();
-            local current_cert = cert;
-            local used_certs = {};
-            local chain = {};
-
-            local i = 1;
-
-            while true do
-
-                used_certs[i] = true;
-
-                outputmanager.line();
-
-                outputmanager.print(i-1 .. ":");
-
-                pretty_cert(outputmanager, current_cert);
-                local cert_id = insert_cert(dbh, current_cert, srv_result_id, i - 1, errors and errors[i] or {});
-
-                chain[#chain + 1] = cert_id;
-
-                if #chain > 1 then
-                    local stm = assert(dbh:prepare("UPDATE certificates SET signed_by_id = ? WHERE certificate_id = ?"));
-
-                    assert(stm:execute(cert_id, chain[#chain - 1]));
-
-                    dbh:commit();
-                end
-
-                local new_cert = nil;
-                i = nil;
-
-                for k,v in ipairs(certs) do
-                    local res, err = conn:did_issue(v, current_cert);
-                    if res > 0 then
-                        new_cert = v;
-                        i = k;
-                        break;
-                    end
-                end
-
-                if new_cert == nil then
-
-                    -- Try to find it in the database before we give up.
-
-                    local q = {};
-                    local args = {}
-
-                    for k,v in pairs(current_cert:issuer()) do
-                        q[#q + 1] = "SELECT certificate_id FROM certificate_subjects WHERE (name = ? AND value = ?)"
-                        args[#args + 1] = v.name;
-                        args[#args + 1] = v.value;
-                    end
-
-                    -- We know nothing. Too much to search through, we give up.
-                    if #q == 0 then
-                        break;
-                    end
-                    
-                    local query = table.concat(q, " INTERSECT ");
-
-                    local stm = assert(dbh:prepare(query));
-
-                    assert(stm:execute(unpack(args)));
-
-                    local result = stm:fetch();
-
-                    if not result then
-                        break
-                    end
-
-                    for k,v in pairs(result) do
-                        local stm = assert(dbh:prepare("SELECT pem FROM certificates WHERE certificate_id = ?"));
-
-                        assert(stm:execute(v));
-
-                        local pem = stm:fetch()[1];
-
-                        local candidate = cert_load(pem);
-
-                        if conn:did_issue(candidate, current_cert) then
-                            local stm = assert(dbh:prepare("UPDATE certificates SET signed_by_id = ? WHERE certificate_id = ?"));
-
-                            assert(stm:execute(v, cert_id));
-
-                            dbh:commit();
-                        end
-                    end
-
-                    break
-                end;
-
-                if new_cert:pem() == current_cert:pem() then
-                    outputmanager.print("Self signed certificate.");
-
-                    local stm = assert(dbh:prepare("UPDATE certificates SET signed_by_id = ? WHERE certificate_id = ?"));
-
-                    assert(stm:execute(cert_id, cert_id));
-
-                    dbh:commit();
-
-                    break;
-                end
-
-                if used_certs[i] then
-                    outputmanager.print(outputmanager.red .. "Certificate chain contains a cycle." .. outputmanager.reset);
-                    break;
-                end
-
-                current_cert = new_cert;
-            end
-
-            outputmanager.line();
-
-            for k,v in ipairs(certs) do
-                if not used_certs[k] then
-                    outputmanager.print(outputmanager.red .. "Found unused certificate in chain:" .. outputmanager.reset);
-                    outputmanager.print(k-1 .. ":");
-
-                    pretty_cert(outputmanager, v);
-                    insert_cert(dbh, v, srv_result_id, k - 1, errors and errors[k] or {});
-
-                    outputmanager.line();
-                end
-            end
-
-            -- Hack: if the subject is identical, we assume the server sent its root CA too.
-            if deep_equal(current_cert:issuer(), current_cert:subject()) then
-                outputmanager.print(outputmanager.red .. "Root CA certificate was included in chain." .. outputmanager.reset);
-            else
-                outputmanager.print("Root CA: ");
-                certmanager.print_subject(outputmanager.print, current_cert:issuer());
-            end
-
-            local certificate_score = 0;
-
-            if chain_valid and valid_identity then
-                certificate_score = 100;
-            end
-
-            outputmanager.line();
-
-            outputmanager.print(outputmanager.green .. "Certificate score: " .. certificate_score .. outputmanager.reset);
-
-            public_key_score = keysize_score(cert:bits());
-
-            outputmanager.line();
-            outputmanager.print("Compression: " .. (conn:info("compression") or "none"));
-            
-            local sth = assert(dbh:prepare("UPDATE srv_results SET compression = ?, certificate_score = ?, valid_identity = ?, trusted = ? WHERE srv_result_id = ?"));
-            assert(sth:execute(conn:info("compression"), certificate_score, valid_identity, chain_valid, srv_result_id));
-
-            dbh:commit();
-
-            outputmanager.line();
-
-            done = true;
-
-            c:debug("Closing stream");
-            c.conn:socket():close();
-            
-            verse.add_task(sleep_for, function ()
-                coroutine.resume(co);
-            end);
         end
-        return false;
-    end, 1000);
 
-    c:hook("disconnected", function ()
-        if not done then
-            done = true;
-            verse.add_task(sleep_for, function ()
-                outputmanager.print(outputmanager.boldred .. "Failed to obtain the server's ceritficate! Is it an XMPP server?" .. outputmanager.reset);
-
-                local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ?"));
-                assert(sth:execute("Connection failed.", srv_result_id));
-
-                verse.add_task(sleep_for, function ()
-                    coroutine.resume(co, false);
-                end);
-            end);
+        -- Hack: if the subject is identical, we assume the server sent its root CA too.
+        if deep_equal(current_cert:issuer(), current_cert:subject()) then
+            outputmanager.print(outputmanager.red .. "Root CA certificate was included in chain." .. outputmanager.reset);
+        else
+            outputmanager.print("Root CA: ");
+            certmanager.print_subject(outputmanager.print, current_cert:issuer());
         end
-    end);
 
-    c:connect_client(jid);
+        local certificate_score = 0;
+
+        if chain_valid and valid_identity then
+            certificate_score = 100;
+        end
+
+        outputmanager.line();
+
+        outputmanager.print(outputmanager.green .. "Certificate score: " .. certificate_score .. outputmanager.reset);
+
+        public_key_score = keysize_score(cert:bits());
+
+        outputmanager.line();
+        outputmanager.print("Compression: " .. (conn:info("compression") or "none"));
+        
+        local sth = assert(dbh:prepare("UPDATE srv_results SET compression = ?, certificate_score = ?, valid_identity = ?, trusted = ? WHERE srv_result_id = ?"));
+        assert(sth:execute(conn:info("compression"), certificate_score, valid_identity, chain_valid, srv_result_id));
+
+        dbh:commit();
+
+        outputmanager.line();
+
+        cert_done = true;
+    end
 end
 
-function test_params(target, port, params)
+local features_done = false;
+
+function test_params(target, port, params, tlsa_answer, srv_result_id)
     local c = verse.new();
     local done = false;
 
@@ -700,20 +577,84 @@ function test_params(target, port, params)
         end
     end
 
-    c:hook("status", function (status)
-        if status == "ssl-handshake-complete" and not done then
+    c:hook("outgoing-raw", function (data) return c:debug("OUT: " .. data); end);
+    c:hook("incoming-raw", function (data) return c:debug("IN: " .. data); end);
+
+    c:hook("stream-error", function(event)
+        if event:get_child("host-unknown", "urn:ietf:params:xml:ns:xmpp-streams") then
+            local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ?"));
+            assert(sth:execute("This server does not serve " .. jid  .. ".", srv_result_id));
+            dbh:commit();
+            outputmanager.print(outputmanager.red .. "This server does not serve " .. jid  .. "." .. outputmanager.reset);
+            if event.from then
+                outputmanager.print(outputmanager.red .. "It appears to be for " .. event.from  .. " instead." .. outputmanager.reset);
+            end
+            c:close();
+            return true;
+        end
+    end, 1000)
+
+    c:hook("stream-features", function (features_stanza)
+        local stanza = features_stanza:get_child("starttls", "urn:ietf:params:xml:ns:xmpp-tls");
+
+        c:debug("Features!")
+
+        local sth = assert(dbh:prepare("UPDATE srv_results SET requires_starttls = ? WHERE srv_result_id = ?"));
+        assert(sth:execute(stanza and stanza:get_child("required") ~= nil, srv_result_id));
+
+        dbh:commit();
+
+        got_sasl(srv_result_id, features_stanza, done);
+
+        if done then
+            c:debug("Closing stream");
+            
             local info = c.conn:socket():info();
 
-            done = true;
-
-            c:debug("Closing stream");
             c.conn:socket():close();
             
             verse.add_task(sleep_for, function ()
                 coroutine.resume(co, info);
             end);
+
+            return false;
         end
-        return false;
+
+        if stanza and stanza:get_child("required") then
+            if not features_done then
+                outputmanager.print("Server " .. outputmanager.green .. "requires" .. outputmanager.reset .. " starttls.");
+                features_done = true;
+            end
+        elseif stanza then
+            if not features_done then
+                outputmanager.print("Server " .. outputmanager.red .. "allows" .. outputmanager.reset .. " starttls.");
+                features_done = true;
+            end
+        else
+            if not features_done then
+                outputmanager.print(outputmanager.boldred .. "Server does not offer starttls!" .. outputmanager.reset);
+                local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ?"));
+                assert(sth:execute("Server does not support encryption.", srv_result_id));
+                dbh:commit();
+
+                features_done = true;
+            end
+            
+            done = true;
+
+            verse.add_task(sleep_for, function ()
+                coroutine.resume(co, nil, "No starttls offered");
+            end);
+        end
+    end, 1000);
+
+    c:hook("status", function (status)
+        if status == "ssl-handshake-complete" and not done then
+
+            got_cert(c, tlsa_answer, srv_result_id);
+
+            done = true;
+        end
     end, 1000);
 
     c:hook("disconnected", function ()
@@ -792,25 +733,86 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
     local params;
 
-    test_cert(target, port, tlsa_answer, srv_result_id);
+    -- if mode == "client" then
+    --     test_sasl(target, port, srv_result_id);
 
-    if coroutine.yield() == false then
-        return
+    --     coroutine.yield();
+    -- end
+
+    local protocols = {};
+    local lowest_protocol, highest_protocol;
+
+    outputmanager.print("Testing protocol support:");
+    outputmanager.print_no_nl("Testing SSLv2 support... ");
+    params = default_params;
+    params.options = {"no_sslv3"};
+    params.protocol = "sslv2";
+    test_params(target, port, params, tlsa_answer, srv_result_id);
+    if print_result(true, coroutine.yield()) then
+        protocols[#protocols + 1] = "sslv2";
+        lowest_protocol = 20;
+        highest_protocol = 20;
+        fail_ssl2 = true;
+    end
+    
+    outputmanager.print_no_nl("Testing SSLv3 support... ");
+    
+    params = deep_copy(default_params);
+    params.options = {"no_sslv2"};
+    params.protocol = "sslv3";
+    test_params(target, port, params, tlsa_answer, srv_result_id);
+    if print_result(nil, coroutine.yield()) then
+        protocols[#protocols + 1] = "sslv3";
+        if not lowest_protocol then lowest_protocol = 80; end
+        highest_protocol = 80;
     end
 
-    if mode == "client" then
-        test_sasl(target, port, srv_result_id);
+    outputmanager.print_no_nl("Testing TLSv1 support... ");
 
-        coroutine.yield();
+    params = deep_copy(default_params);
+    params.options = {"no_sslv3"};
+    params.protocol = "tlsv1";
+    test_params(target, port, params, tlsa_answer, srv_result_id);
+    if print_result(nil, coroutine.yield()) then
+        protocols[#protocols + 1] = "tlsv1";
+        if not lowest_protocol then lowest_protocol = 90; end
+        highest_protocol = 90;
+    end
+    
+    outputmanager.print_no_nl("Testing TLSv1.1 support... ");
+
+    params = deep_copy(default_params);
+    params.options = {"no_sslv3","no_tlsv1"};
+    params.protocol = "tlsv1_1";
+    test_params(target, port, params, tlsa_answer, srv_result_id);
+    if print_result(false, coroutine.yield()) then
+        protocols[#protocols + 1] = "tlsv1_1";
+        if not lowest_protocol then lowest_protocol = 95; end
+        highest_protocol = 95;
     end
 
-    if mode == "server" then
+    outputmanager.print_no_nl("Testing TLSv1.2 support... ");
+
+    params = deep_copy(default_params);
+    params.options = {"no_sslv3","no_tlsv1","no_tlsv1_1"};
+    params.protocol = "tlsv1_2";
+    test_params(target, port, params, tlsa_answer, srv_result_id);
+    if print_result(false, coroutine.yield()) then
+        protocols[#protocols + 1] = "tlsv1_2";
+        if not lowest_protocol then lowest_protocol = 100; end
+        highest_protocol = 100;
+    end
+
+    local sth = assert(dbh:prepare("UPDATE srv_results SET sslv2 = '0', sslv3 = '0', tlsv1 = '0', tlsv1_1 = '0', tlsv1_2 = '0' WHERE srv_result_id = ?;"));
+    assert(sth:execute(srv_result_id));
+
+    if mode == "server" and #protocols > 0 then
         params = deep_copy(default_params);
         params.key = nil;
         params.certificate = nil;
-        params.protocol = "sslv23";
+        params.protocol = protocols[1];
 
-        test_params(target, port, params);
+        test_params(target, port, params, tlsa_answer, srv_result_id);
 
         local info, err = coroutine.yield();
 
@@ -828,73 +830,6 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
         outputmanager.line();
     end
 
-    local protocols = {};
-    local lowest_protocol, highest_protocol;
-
-    outputmanager.print("Testing protocol support:");
-    outputmanager.print_no_nl("Testing SSLv2 support... ");
-    params = default_params;
-    params.options = {"no_sslv3"};
-    params.protocol = "sslv2";
-    test_params(target, port, params);
-    if print_result(true, coroutine.yield()) then
-        protocols[#protocols + 1] = "sslv2";
-        lowest_protocol = 20;
-        highest_protocol = 20;
-        fail_ssl2 = true;
-    end
-    
-    outputmanager.print_no_nl("Testing SSLv3 support... ");
-    
-    params = deep_copy(default_params);
-    params.options = {"no_sslv2"};
-    params.protocol = "sslv3";
-    test_params(target, port, params);
-    if print_result(nil, coroutine.yield()) then
-        protocols[#protocols + 1] = "sslv3";
-        if not lowest_protocol then lowest_protocol = 80; end
-        highest_protocol = 80;
-    end
-
-    outputmanager.print_no_nl("Testing TLSv1 support... ");
-
-    params = deep_copy(default_params);
-    params.options = {"no_sslv3"};
-    params.protocol = "tlsv1";
-    test_params(target, port, params);
-    if print_result(nil, coroutine.yield()) then
-        protocols[#protocols + 1] = "tlsv1";
-        if not lowest_protocol then lowest_protocol = 90; end
-        highest_protocol = 90;
-    end
-    
-    outputmanager.print_no_nl("Testing TLSv1.1 support... ");
-
-    params = deep_copy(default_params);
-    params.options = {"no_sslv3","no_tlsv1"};
-    params.protocol = "tlsv1_1";
-    test_params(target, port, params);
-    if print_result(false, coroutine.yield()) then
-        protocols[#protocols + 1] = "tlsv1_1";
-        if not lowest_protocol then lowest_protocol = 95; end
-        highest_protocol = 95;
-    end
-
-    outputmanager.print_no_nl("Testing TLSv1.2 support... ");
-
-    params = deep_copy(default_params);
-    params.options = {"no_sslv3","no_tlsv1","no_tlsv1_1"};
-    params.protocol = "tlsv1_2";
-    test_params(target, port, params);
-    if print_result(false, coroutine.yield()) then
-        protocols[#protocols + 1] = "tlsv1_2";
-        if not lowest_protocol then lowest_protocol = 100; end
-        highest_protocol = 100;
-    end
-
-    local sth = assert(dbh:prepare("UPDATE srv_results SET sslv2 = '0', sslv3 = '0', tlsv1 = '0', tlsv1_1 = '0', tlsv1_2 = '0' WHERE srv_result_id = ?;"));
-    assert(sth:execute(srv_result_id));
-
     for k,v in ipairs(protocols) do
         -- v can only be sslv2, sslv3, tlsv1, tlsv1_1 or tlsv1_2, so this is fine. Really.
         local sth = assert(dbh:prepare("UPDATE srv_results SET " .. v .. " = '1' WHERE srv_result_id = ?"));
@@ -902,6 +837,11 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
     end
 
     dbh:commit();
+
+    if #protocols == 0 then
+        outputmanager.print(outputmanager.red .. "No SSL or TLS support detected." .. outputmanager.reset);
+        return
+    end
 
     local protocol_score = (lowest_protocol + highest_protocol)/2;
 
