@@ -597,12 +597,7 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
     c:hook("stream-features", function (features_stanza)
         local stanza = features_stanza:get_child("starttls", "urn:ietf:params:xml:ns:xmpp-tls");
 
-        c:debug("Features!")
-
-        local sth = assert(dbh:prepare("UPDATE srv_results SET requires_starttls = ? WHERE srv_result_id = ?"));
-        assert(sth:execute(stanza and stanza:get_child("required") ~= nil, srv_result_id));
-
-        dbh:commit();
+        c:debug("Features!");
 
         got_sasl(srv_result_id, features_stanza, done);
 
@@ -624,11 +619,21 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
             if not features_done then
                 outputmanager.print("Server " .. outputmanager.green .. "requires" .. outputmanager.reset .. " starttls.");
                 features_done = true;
+
+                local sth = assert(dbh:prepare("UPDATE srv_results SET requires_starttls = ? WHERE srv_result_id = ?"));
+                assert(sth:execute(true, srv_result_id));
+
+                dbh:commit();
             end
         elseif stanza then
             if not features_done then
                 outputmanager.print("Server " .. outputmanager.red .. "allows" .. outputmanager.reset .. " starttls.");
                 features_done = true;
+
+                local sth = assert(dbh:prepare("UPDATE srv_results SET requires_starttls = ? WHERE srv_result_id = ?"));
+                assert(sth:execute(false, srv_result_id));
+
+                dbh:commit();
             end
         else
             if not features_done then
