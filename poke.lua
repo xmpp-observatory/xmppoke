@@ -1232,6 +1232,12 @@ co = coroutine.create(function ()
         
         for k,v in ipairs(srv_records) do
             local srv = v.srv;
+            
+            features_done = false;
+            cert_done = false;
+            sasl_done = false;
+            sasl_tls_done = false;
+
             outputmanager.print("Testing server: " .. srv.target .. ":" .. srv.port .. ".");
 
             local tlsa = "_" .. srv.port .. "._tcp." .. srv.target;
