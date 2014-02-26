@@ -840,6 +840,11 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
     if #protocols == 0 then
         outputmanager.print(outputmanager.red .. "No SSL or TLS support detected." .. outputmanager.reset);
+
+        local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ?"));
+        assert(sth:execute("Connection failed.", srv_result_id));
+        dbh:commit();
+
         return
     end
 
