@@ -609,7 +609,7 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
             c.conn:socket():close();
             
             verse.add_task(sleep_for, function ()
-                coroutine.resume(co, info);
+                assert(coroutine.resume(co, info));
             end);
 
             return false;
@@ -648,7 +648,7 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
             done = true;
 
             verse.add_task(sleep_for, function ()
-                coroutine.resume(co, nil, "No starttls offered");
+                assert(coroutine.resume(co, nil, "No starttls offered"));
             end);
         end
     end, 1000);
@@ -666,7 +666,7 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
         if not done then
             done = true;
             verse.add_task(sleep_for, function ()
-                coroutine.resume(co, nil, "Disconnected");
+                assert(coroutine.resume(co, nil, "Disconnected"));
             end);
         end
     end);
@@ -676,7 +676,7 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
             c:debug("Handshake took 30 seconds. Giving up.");
             done = true;
             verse.add_task(sleep_for, function ()
-                coroutine.resume(co, nil, "Timeout");
+                assert(coroutine.resume(co, nil, "Timeout"));
             end);
         end
     end);
@@ -1161,8 +1161,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 end
 
 co = coroutine.create(function ()
-    assert(pcall(function ()
-        local f = adns.lookup(function (a) assert(pcall(function () print(a); coroutine.resume(co, a) end)) end, "_xmpp-" .. mode .. "._tcp." .. to_ascii(host), "SRV");
+        local f = adns.lookup(function (a) assert(coroutine.resume(co, a)) end, "_xmpp-" .. mode .. "._tcp." .. to_ascii(host), "SRV");
         local srv_records = coroutine.yield();
 
         if version_jid and version_password then
@@ -1179,7 +1178,7 @@ co = coroutine.create(function ()
             version:hook("ready", function ()
                 version:query_version(host, function (v)
                         if not done then
-                            coroutine.resume(co, (v.name or "unknown") .. " " .. (v.version or "unknown"));
+                            assert(coroutine.resume(co, (v.name or "unknown") .. " " .. (v.version or "unknown")));
                             version:close();
                             done = true;
                         end
@@ -1254,7 +1253,7 @@ co = coroutine.create(function ()
 
                 outputmanager.print("TLSA records:");
 
-                local f = adns.lookup(function (a) coroutine.resume(co, a) end, tlsa, "TLSA");
+                local f = adns.lookup(function (a) assert(coroutine.resume(co, a)) end, tlsa, "TLSA");
 
                 tlsa_answer = coroutine.yield();
 
@@ -1282,13 +1281,11 @@ co = coroutine.create(function ()
 
         dbh:close();
 
-        return true;
-    end));
-    os.exit();
+        os.exit();
 end)
 
 verse.add_task(0, function ()
-    coroutine.resume(co);
+    assert(coroutine.resume(co));
 end);
 
 verse.add_task(30 * 60, function ()
