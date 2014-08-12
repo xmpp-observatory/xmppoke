@@ -186,13 +186,19 @@ local function deep_copy(orig)
     return copy;
 end
 
-local function keysize_score(bits)
-    if bits == 0 then return 0; end
-    if bits < 512 then return 20; end
-    if bits < 1024 then return 40; end
-    if bits < 2048 then return 80; end
-    if bits < 4096 then return 90; end
-    return 100;
+local function keysize_score(pem, keytype, bits)
+    if keytype == "RSA" or keytype == "DSA" then
+        if bits == 0 then return 0; end
+        if bits < 512 then return 20; end
+        if bits < 1024 then return 40; end
+        if bits < 2048 then return 80; end
+        if bits < 4096 then return 90; end
+        return 100;
+    elseif keytype == "EC" then
+        return 100;
+    end
+    -- Don't know how to judge DH...
+    assert(false);
 end
 
 default_params = { mode = "client",
@@ -217,14 +223,16 @@ local function insert_cert(dbh, cert, srv_result_id, chain_index, errors)
 
     if not results or #results == 0 then
         local q = "INSERT INTO certificates ( pem, notbefore, notafter, digest_sha1, digest_sha256," ..
-                                            " digest_sha512, rsa_bitsize, rsa_modulus," ..
+                                            " digest_sha512, pubkey_bitsize, pubkey_type, rsa_modulus," ..
                                             " debian_weak_key, sign_algorithm, trusted_root, crl_url, ocsp_url," ..
                                             " subject_key_info, subject_key_info_sha256, subject_key_info_sha512)" ..
                                         " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM certificates WHERE digest_sha512 = ?)";
 
         local spki = cert:spki();
+        local _, pubkey_type, pubkey_bitsize = cert:pubkey();
+
         cert_id, err = execute_and_get_id(q, pem, date(cert:notbefore()):fmt("%Y-%m-%d %T"), date(cert:notafter()):fmt("%Y-%m-%d %T"), cert:digest("sha1"), cert:digest("sha256"),
-                           cert:digest("sha512"), cert:bits(), cert:modulus(),
+                           cert:digest("sha512"), pubkey_bitsize, pubkey_type, cert:modulus(),
                            debian_weak_key(cert), cert:signature_alg(), false, cert:crl(), cert:ocsp(),
                            hex(spki), hex(sha256(spki)), hex(sha512(spki)), cert:digest("sha512"));
 
@@ -545,7 +553,11 @@ function got_cert(c, tlsa_answer, srv_result_id)
 
         outputmanager.print(outputmanager.green .. "Certificate score: " .. certificate_score .. outputmanager.reset);
 
-        public_key_score = keysize_score(cert:bits());
+        local pubkey, keytype, bits = cert:pubkey();
+
+        outputmanager.print(keytype .. " " .. bits);
+
+        public_key_score = keysize_score(cert:pubkey());
 
         outputmanager.line();
         outputmanager.print("Compression: " .. (conn:info("compression") or "none"));
