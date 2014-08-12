@@ -653,6 +653,7 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
             
             local info = c.conn:socket():info();
 
+            c:close();
             c.conn:socket():close();
             
             verse.add_task(sleep_for, function ()
