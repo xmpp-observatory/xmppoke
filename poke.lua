@@ -48,7 +48,7 @@ local jid = host;
 
 -- Imports
 
-local date = require("3rdparty/date");
+local date = require("3rdparty.date");
 local ssl = require("ssl");
 local io = require("io");
 local os = require("os");
@@ -256,7 +256,7 @@ local function insert_cert(dbh, cert, srv_result_id, chain_index, errors)
 
     stm = assert(dbh:prepare("SELECT COUNT(*) FROM certificate_sans WHERE certificate_id = ?"));
 
-    assert(stm:execute());
+    assert(stm:execute(cert_id));
 
     local count = stm:fetch()[1];
 
