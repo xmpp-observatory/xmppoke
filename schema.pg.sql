@@ -55,7 +55,8 @@ CREATE TABLE certificates
 , subject_key_info TEXT
 , subject_key_info_sha256 TEXT
 , subject_key_info_sha512 TEXT
-, rsa_bitsize INTEGER
+, pubkey_bitsize INTEGER
+, pubkey_type TEXT
 , rsa_modulus TEXT
 , debian_weak_key BOOLEAN
 , sign_algorithm TEXT
@@ -86,6 +87,15 @@ CREATE TABLE certificate_subjects
 );
 
 CREATE UNIQUE INDEX certificate_subjects_unique ON certificate_subjects (certificate_id, oid, value);
+
+CREATE TABLE certificate_sans
+( certificate_san_id SERIAL UNIQUE
+, certificate_id INTEGER REFERENCES certificates(certificate_id)
+, san_type TEXT CHECK(san_type IN ('DNSName','SRVName','XMPPAddr')) NOT NULL
+, san_value TEXT
+);
+
+CREATE UNIQUE INDEX certificate_sans_unique ON certificate_sans (certificate_id, san_type, san_value);
 
 CREATE TABLE tlsa_records
 ( tlsa_record_id SERIAL UNIQUE

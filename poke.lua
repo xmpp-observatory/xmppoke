@@ -254,6 +254,29 @@ local function insert_cert(dbh, cert, srv_result_id, chain_index, errors)
         cert_id = results[1];
     end
 
+    stm = assert(dbh:prepare("SELECT COUNT(*) FROM certificate_sans WHERE certificate_id = '?';"))
+
+    if cert:extensions()["2.5.29.17"] and assert(stm:execute(cert_id)) == 0 then
+        local sans = cert:extensions()["2.5.29.17"];
+        local dnsnames = {};
+        local xmppaddrs = {};
+        local srvnames = {};
+
+        stm = assert(dbh:prepare("INSERT INTO certificate_sans (certificate_id, san_type, san_value) VALUES (?, ?, ?)"));
+
+        for k,v in ipairs(sans.dNSName) do
+            assert(stm:execute(cert_id, "DNSName", v));
+        end
+
+        for k,v in ipairs(sans["1.3.6.1.5.5.7.8.5"]) do -- xmppAddr
+            assert(stm:execute(cert_id, "XMPPAddr", v));
+        end
+
+        for k,v in ipairs(sans["1.3.6.1.5.5.7.8.7"]) do --= SRVName
+            assert(stm:execute(cert_id, "SRVName", v));
+        end
+    end
+
     local srv_certificate_id = assert(execute_and_get_id("INSERT INTO srv_certificates (srv_result_id, certificate_id, chain_index) VALUES (?, ?, ?)", srv_result_id, cert_id, chain_index));
 
     print(srv_certificate_id);
