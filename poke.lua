@@ -288,12 +288,14 @@ function got_sasl(srv_result_id, features_stanza, tls)
             outputmanager.print("None");
         else
             for k,v in ipairs(stanza) do
-                outputmanager.print(v:get_text())
+                if v.name == "mechanism" then
+                    outputmanager.print(v:get_text())
 
-                local sth = assert(dbh:prepare("INSERT INTO srv_mechanisms (srv_result_id, mechanism, after_tls) VALUES (?, ?, ?)"));
-                assert(sth:execute(srv_result_id, v:get_text(), tls));
+                    local sth = assert(dbh:prepare("INSERT INTO srv_mechanisms (srv_result_id, mechanism, after_tls) VALUES (?, ?, ?)"));
+                    assert(sth:execute(srv_result_id, v:get_text(), tls));
 
-                dbh:commit();
+                    dbh:commit();
+                end
             end
         end
 
