@@ -268,16 +268,22 @@ local function insert_cert(dbh, cert, srv_result_id, chain_index, errors)
 
         stm = assert(dbh:prepare("INSERT INTO certificate_sans (certificate_id, san_type, san_value) VALUES (?, ?, ?)"));
 
-        for k,v in ipairs(sans.dNSName) do
-            assert(stm:execute(cert_id, "DNSName", v));
+        if sans.dNSName then
+            for k,v in ipairs(sans.dNSName) do
+                assert(stm:execute(cert_id, "DNSName", v));
+            end
         end
 
-        for k,v in ipairs(sans["1.3.6.1.5.5.7.8.5"]) do -- xmppAddr
-            assert(stm:execute(cert_id, "XMPPAddr", v));
+        if sans["1.3.6.1.5.5.7.8.5"] then
+            for k,v in ipairs(sans["1.3.6.1.5.5.7.8.5"]) do -- xmppAddr
+                assert(stm:execute(cert_id, "XMPPAddr", v));
+            end
         end
 
-        for k,v in ipairs(sans["1.3.6.1.5.5.7.8.7"]) do --= SRVName
-            assert(stm:execute(cert_id, "SRVName", v));
+        if sans["1.3.6.1.5.5.7.8.7"] then
+            for k,v in ipairs(sans["1.3.6.1.5.5.7.8.7"]) do --= SRVName
+                assert(stm:execute(cert_id, "SRVName", v));
+            end
         end
     end
 
