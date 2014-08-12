@@ -194,7 +194,7 @@ end
 function stream:reopen()
 	self:reset();
 	self:send(st.stanza("stream:stream", { to = self.host, ["xmlns:stream"]='http://etherx.jabber.org/streams',
-		xmlns = "jabber:server", version = "1.0", from = "observatory.xmpp.net", ["xmlns:db"]='jabber:server:dialback' }):top_tag());
+		xmlns = "jabber:server", version = "1.0", from = "xmpp.net", ["xmlns:db"]='jabber:server:dialback' }):top_tag());
 end
 
 function stream:send_iq(iq, callback)
