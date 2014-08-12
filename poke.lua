@@ -226,7 +226,7 @@ local function insert_cert(dbh, cert, srv_result_id, chain_index, errors)
                                             " digest_sha512, pubkey_bitsize, pubkey_type, rsa_modulus," ..
                                             " debian_weak_key, sign_algorithm, trusted_root, crl_url, ocsp_url," ..
                                             " subject_key_info, subject_key_info_sha256, subject_key_info_sha512)" ..
-                                        " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM certificates WHERE digest_sha512 = ?)";
+                                        " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM certificates WHERE digest_sha512 = ?)";
 
         local spki = cert:spki();
         local _, pubkey_type, pubkey_bitsize = cert:pubkey();
