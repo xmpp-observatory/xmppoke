@@ -254,9 +254,13 @@ local function insert_cert(dbh, cert, srv_result_id, chain_index, errors)
         cert_id = results[1];
     end
 
-    stm = assert(dbh:prepare("SELECT COUNT(*) FROM certificate_sans WHERE certificate_id = ?;"))
+    stm = assert(dbh:prepare("SELECT COUNT(*) FROM certificate_sans WHERE certificate_id = ?"));
 
-    if cert:extensions()["2.5.29.17"] and assert(stm:execute(cert_id)) == 0 then
+    assert(stm:execute());
+
+    local count = stm:fetch()[1];
+
+    if cert:extensions()["2.5.29.17"] and count == 0 then
         local sans = cert:extensions()["2.5.29.17"];
         local dnsnames = {};
         local xmppaddrs = {};
