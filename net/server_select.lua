@@ -447,8 +447,9 @@ wrapconnection = function( server, listeners, socket, ip, serverport, clientport
 		return noread, nosend
 	end
 	local _readbuffer = function( ) -- this function reads data
+		out_put("server.lua: client", tostring(handler), " ", tostring(socket));
 		if not socket then
-			disconnect( hander, "socket disappeared" );
+			disconnect( handler, "socket disappeared" );
 			handler:close( true )
 			return false
 		end
