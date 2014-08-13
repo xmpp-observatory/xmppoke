@@ -655,7 +655,6 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
 
             verse.add_task(1, function ()
                 c:close();
-                verse.closesocket(c.conn:socket());
             end);
             
             verse.add_task(sleep_for, function ()
