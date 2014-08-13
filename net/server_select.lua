@@ -449,7 +449,7 @@ wrapconnection = function( server, listeners, socket, ip, serverport, clientport
 	local _readbuffer = function( ) -- this function reads data
 		if not socket then
 			disconnect( hander, "socket disappeared" );
-			hander:close( true )
+			handler:close( true )
 			return false
 		end
 		local buffer, err, part = receive( socket, pattern )	-- receive buffer with "pattern"
