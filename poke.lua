@@ -617,6 +617,7 @@ local features_done = false;
 function test_params(target, port, params, tlsa_answer, srv_result_id)
     local c = verse.new();
     local done = false;
+    local ssl_done = false;
 
     c.tlsparams = params;
     c.connect_host = target;
@@ -662,23 +663,7 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
 
         c:debug("Features!");
 
-        got_sasl(srv_result_id, features_stanza, done);
-
-        if done then
-            c:debug("Closing stream");
-            
-            local info = c.conn:socket():info();
-
-            verse.add_task(1, function ()
-                c:close();
-            end);
-            
-            verse.add_task(sleep_for, function ()
-                assert(coroutine.resume(co, info));
-            end);
-
-            return false;
-        end
+        got_sasl(srv_result_id, features_stanza, ssl_done);
 
         if stanza and stanza:get_child("required") then
             if not features_done then
@@ -716,10 +701,29 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
                 assert(coroutine.resume(co, nil, "No starttls offered"));
             end);
         end
+
+        if ssl_done and not done then
+            done = true;
+
+            c:debug("Closing stream");
+            
+            local info = c.conn:socket():info();
+
+            verse.add_task(1, function ()
+                c:close();
+            end);
+            
+            verse.add_task(sleep_for, function ()
+                assert(coroutine.resume(co, info));
+            end);
+
+            return false;
+        end
     end, 1000);
 
     c:hook("status", function (status)
         if status == "ssl-handshake-complete" then
+            ssl_done = true;
             got_cert(c, tlsa_answer, srv_result_id);
         end
     end, 1000);
