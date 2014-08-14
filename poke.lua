@@ -717,11 +717,8 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
     end, 1000);
 
     c:hook("status", function (status)
-        if status == "ssl-handshake-complete" and not done then
-
+        if status == "ssl-handshake-complete" then
             got_cert(c, tlsa_answer, srv_result_id);
-
-            done = true;
         end
     end, 1000);
 
