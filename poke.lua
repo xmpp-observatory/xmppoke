@@ -665,44 +665,44 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
 
         got_sasl(srv_result_id, features_stanza, ssl_done);
 
-        if stanza and stanza:get_child("required") then
-            if not features_done then
-                outputmanager.print("Server " .. outputmanager.green .. "requires" .. outputmanager.reset .. " starttls.");
-                features_done = true;
+        if not ssl_done then
+            if stanza and stanza:get_child("required") then
+                if not features_done then
+                    outputmanager.print("Server " .. outputmanager.green .. "requires" .. outputmanager.reset .. " starttls.");
+                    features_done = true;
 
-                local sth = assert(dbh:prepare("UPDATE srv_results SET requires_starttls = ? WHERE srv_result_id = ?"));
-                assert(sth:execute(true, srv_result_id));
+                    local sth = assert(dbh:prepare("UPDATE srv_results SET requires_starttls = ? WHERE srv_result_id = ?"));
+                    assert(sth:execute(true, srv_result_id));
 
-                dbh:commit();
+                    dbh:commit();
+                end
+            elseif stanza then
+                if not features_done then
+                    outputmanager.print("Server " .. outputmanager.red .. "allows" .. outputmanager.reset .. " starttls.");
+                    features_done = true;
+
+                    local sth = assert(dbh:prepare("UPDATE srv_results SET requires_starttls = ? WHERE srv_result_id = ?"));
+                    assert(sth:execute(false, srv_result_id));
+
+                    dbh:commit();
+                end
+            else
+                if not features_done then
+                    outputmanager.print(outputmanager.boldred .. "Server does not offer starttls!" .. outputmanager.reset);
+                    local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ? AND error IS NULL"));
+                    assert(sth:execute("Server does not support encryption.", srv_result_id));
+                    dbh:commit();
+
+                    features_done = true;
+                end
+                
+                done = true;
+
+                verse.add_task(sleep_for, function ()
+                    assert(coroutine.resume(co, nil, "No starttls offered"));
+                end);
             end
-        elseif stanza then
-            if not features_done then
-                outputmanager.print("Server " .. outputmanager.red .. "allows" .. outputmanager.reset .. " starttls.");
-                features_done = true;
-
-                local sth = assert(dbh:prepare("UPDATE srv_results SET requires_starttls = ? WHERE srv_result_id = ?"));
-                assert(sth:execute(false, srv_result_id));
-
-                dbh:commit();
-            end
-        else
-            if not features_done then
-                outputmanager.print(outputmanager.boldred .. "Server does not offer starttls!" .. outputmanager.reset);
-                local sth = assert(dbh:prepare("UPDATE srv_results SET error = ?, done = 't' WHERE srv_result_id = ? AND error IS NULL"));
-                assert(sth:execute("Server does not support encryption.", srv_result_id));
-                dbh:commit();
-
-                features_done = true;
-            end
-            
-            done = true;
-
-            verse.add_task(sleep_for, function ()
-                assert(coroutine.resume(co, nil, "No starttls offered"));
-            end);
-        end
-
-        if ssl_done and not done then
+        elseif not done then
             done = true;
 
             c:debug("Closing stream");
