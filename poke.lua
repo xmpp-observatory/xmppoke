@@ -433,7 +433,7 @@ function got_cert(c, tlsa_answer, srv_result_id)
         end
 
         local _, keytype = cert:pubkey()
-        
+
         if keytype == "RSA" or keytype == "DSA" then
             if cert:bits() < 1024 then
                 fail_1024 = true;
@@ -642,6 +642,15 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
             end
             c:close();
             return true;
+        else if event:get_child("not-authorized", "urn:ietf:params:xml:ns:xmpp-streams") then
+            if not done then
+                done = true;
+
+                verse.add_task(sleep_for, function ()
+                    assert(coroutine.resume(co, nil, "Remote did not trust our cert."));
+                end);
+
+            end
         end
     end, 1000)
 
