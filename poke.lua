@@ -432,10 +432,14 @@ function got_cert(c, tlsa_answer, srv_result_id)
             fail_untrusted = true;
         end
 
-        if cert:bits() < 1024 then
-            fail_1024 = true;
-        elseif cert:bits() < 2048 then
-            cap_2048 = true;
+        local _, keytype = cert:pubkey()
+        
+        if keytype == "RSA" or keytype == "DSA" then
+            if cert:bits() < 1024 then
+                fail_1024 = true;
+            elseif cert:bits() < 2048 then
+                cap_2048 = true;
+            end
         end
 
         if cert:signature_alg() == "md5WithRSAEncryption" then
