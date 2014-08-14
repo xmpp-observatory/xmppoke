@@ -650,6 +650,8 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
                     assert(coroutine.resume(co, nil, "Remote did not trust our cert."));
                 end);
             end
+            c:close();
+            return true;
         end
     end, 1000)
 
