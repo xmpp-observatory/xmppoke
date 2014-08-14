@@ -646,8 +646,10 @@ function test_params(target, port, params, tlsa_answer, srv_result_id)
             if not done then
                 done = true;
 
+                local info = c.conn:socket():info();
+
                 verse.add_task(sleep_for, function ()
-                    assert(coroutine.resume(co, nil, "Remote did not trust our cert."));
+                    assert(coroutine.resume(co, info, "Remote did not trust our cert."));
                 end);
             end
             c:close();
@@ -777,7 +779,7 @@ local function print_cipher_result(info, err)
 end
 
 local function print_result(bad, info, err)
-    if err then
+    if not info then
         if bad then outputmanager.print_no_nl(outputmanager.green); end
         if not bad then outputmanager.print_no_nl(outputmanager.red); end
         outputmanager.print("No." .. outputmanager.reset);
@@ -881,7 +883,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
         local info, err = coroutine.yield();
 
-        if not info then
+        if not info or err == "Remote did not trust our cert." then
             outputmanager.print("Server " .. outputmanager.green .. "requires" .. outputmanager.reset .. " initiating server to present a certificate.");
 
             local sth = assert(dbh:prepare("UPDATE srv_results SET requires_peer_cert = '1' WHERE srv_result_id = ?"));
