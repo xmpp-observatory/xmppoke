@@ -259,7 +259,7 @@ local function insert_cert(dbh, cert, srv_result_id, chain_index, errors)
 
     assert(stm:execute(cert_id));
 
-    local count = 1 -- stm:fetch()[1];
+    local count = stm:fetch()[1];
 
     if cert:extensions()["2.5.29.17"] and count == 0 then
         local sans = cert:extensions()["2.5.29.17"];
