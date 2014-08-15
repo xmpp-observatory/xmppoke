@@ -41,6 +41,7 @@ CREATE TABLE srv_results
 , a_aaaa_dnssec_good BOOLEAN
 , a_aaaa_dnssec_bogus BOOLEAN
 , warn_rc4_tls11 BOOLEAN
+, warn_no_fs BOOLEAN
 , error TEXT
 );
 

@@ -150,6 +150,7 @@ local fail_1024 = false;
 local fail_md5 = false;
 local cap_2048 = false;
 local warn_rc4_tls11 = false;
+local warn_no_fs = true;
 
 local function deep_equal(a, b)
     if type(a) ~= type(b) then
@@ -258,7 +259,7 @@ local function insert_cert(dbh, cert, srv_result_id, chain_index, errors)
 
     assert(stm:execute(cert_id));
 
-    local count = stm:fetch()[1];
+    local count = 1 -- stm:fetch()[1];
 
     if cert:extensions()["2.5.29.17"] and count == 0 then
         local sans = cert:extensions()["2.5.29.17"];
@@ -968,6 +969,10 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
             if info.encryption == "RC4(128)" and (v == "tslv1_1" or v == "tlsv1_2") then
                 warn_rc4_tls11 = true;
             end
+
+            if info.cipher:find("ECDHE-") == 1 or info.cipher:find("DHE-") == 1 then
+                warn_no_fs = false;
+            end
        end
     end
 
@@ -1216,10 +1221,14 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
         outputmanager.print(outputmanager.red .. "Warning: Server allows RC4 with TLS 1.1 and/or 1.2." .. outputmanager.reset);
     end
 
+    if warn_no_fs then
+        outputmanager.print(outputmanager.red .. "Warning: Server offers no FS." .. outputmanager.reset);
+    end
+
     outputmanager.print("Grade: " .. final_grade  .. outputmanager.reset);
 
-    local sth = assert(dbh:prepare("UPDATE srv_results SET total_score = ?, grade = ?, done = '1', warn_rc4_tls11 = ? WHERE srv_result_id = ?"));
-    assert(sth:execute(total_score, final_grade, warn_rc4_tls11, srv_result_id));
+    local sth = assert(dbh:prepare("UPDATE srv_results SET total_score = ?, grade = ?, done = '1', warn_rc4_tls11 = ?, warn_no_fs = ? WHERE srv_result_id = ?"));
+    assert(sth:execute(total_score, final_grade, warn_rc4_tls11, warn_no_fs, srv_result_id));
 
     dbh:commit();
 
