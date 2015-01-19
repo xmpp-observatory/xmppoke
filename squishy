@@ -1,13 +1,21 @@
 Output "xmppoke.lua"
 
-AutoFetchURL "http://hg.prosody.im/0.9/raw-file/381e0b874e6d/?"
+Module "core.configmanager" "configmanager.lua"
+Module "onions" "onions.lua"
+
+AutoFetchURL "./luaunbound/?"
+
+Module "net.adns" "net.unbound.lua"
+Module "util.dns" "util.dns.lua"
+Module "lib.unbound" "lib.unbound.lua"
+Module "net.dns" "fakedns.lua"
+
+AutoFetchURL "https://hg.prosody.im/0.9/raw-file/381e0b874e6d/?"
 
 Module "util.stanza"		"util/stanza.lua"
 Module "util.timer"		"util/timer.lua"
 -- Module "util.termcolours"	"util/termcolours.lua"
 -- Module "util.uuid"		"util/uuid.lua"
-Module "net.dns"               "net/dns.lua"
-Module "net.adns"              "net/adns.lua"
 Module "net.server"		"net/server_select.lua"
 Module "util.xmppstream"	"util/xmppstream.lua"
 Module "util.jid"		"util/jid.lua"
@@ -16,7 +24,7 @@ Module "util.caps"		"util/caps.lua"
 Module "util.logger"		"util/logger.lua"
 Module "util.datetime"		"util/datetime.lua"
 
-AutoFetchURL "http://hg.prosody.im/0.9/raw-file/bb27ba619932/?"
+AutoFetchURL "https://hg.prosody.im/0.9/raw-file/bb27ba619932/?"
 
 Module "util.x509"		"util/x509.lua"
 
