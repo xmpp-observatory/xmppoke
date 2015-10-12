@@ -12,7 +12,9 @@ local opts = {
     blacklist = "/usr/share/openssl-blacklist/",
     version_jid = "poke@xnyhps.nl",
     version_password = nil,
-    db_password = nil
+    db_password = nil,
+    db_host = "localhost",
+    db_port = 5432
     };
 
 for _, opt in ipairs(arg) do
@@ -35,6 +37,8 @@ local openssl_blacklists = opts.blacklist;
 local version_jid = opts.version_jid;
 local version_password = opts.version_password;
 local db_password = opts.db_password;
+local db_host = opts.db_host;
+local db_port = opts.db_port;
 
 if not host or (mode ~= "server" and mode ~= "client") then
     print(string.format("Usage: %s [-v] [--mode=(server|client)] [--delay=seconds] [--capath=path] [--cafile=file] [--key=privatekey] [--certificate=certificate] [--blacklist=path] hostname", arg[0]));
@@ -64,6 +68,7 @@ local verse = require("verse");
 local to_ascii = require "util.encodings".idna.to_ascii;
 local sha512 = require("util.hashes").sha512;
 local sha256 = require("util.hashes").sha256;
+
 local log = require("util.logger").init("poke");
 
 
@@ -72,7 +77,9 @@ if opts.verbose then
 end
 
 
-local dbh = assert(dbi.Connect("PostgreSQL", "xmppoke", "xmppoke", db_password, "localhost", 5432));
+log("debug", "Connecting to database on " .. db_host .. ":" .. db_port .. ".")
+
+local dbh = assert(dbi.Connect("PostgreSQL", "xmppoke", "xmppoke", db_password, db_host, db_port));
 
 local stm = assert(dbh:prepare("SET TIMEZONE = 'UTC';"));
 
@@ -515,31 +522,33 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
     local params;
 
-    -- if mode == "client" then
-    --     test_sasl(target, port, srv_result_id);
-
-    --     coroutine.yield();
-    -- end
-
     local protocols = {};
     local lowest_protocol, highest_protocol;
 
-    -- params = default_params;
-    -- params.options = {"no_sslv3"};
-    -- params.protocol = "sslv2";
-    -- test_params(target, port, params, tlsa_answer, srv_result_id);
-    -- if print_result(true, coroutine.yield()) then
-    --     protocols[#protocols + 1] = "sslv2";
-    --     lowest_protocol = 20;
-    --     highest_protocol = 20;
-    --     fail_ssl2 = true;
-    -- end
+    local info = nil;
+
+    params = default_params;
+    params.options = {"no_sslv3"};
+    params.protocol = "sslv2";
+    test_params(target, port, params, tlsa_answer, srv_result_id);
+    
+    info = coroutine.yield();
+    
+    if info then
+        protocols[#protocols + 1] = "sslv2";
+        lowest_protocol = 20;
+        highest_protocol = 20;
+        fail_ssl2 = true;
+    end
     
     params = deep_copy(default_params);
     params.options = {"no_sslv2"};
     params.protocol = "sslv3";
     test_params(target, port, params, tlsa_answer, srv_result_id);
-    if print_result(nil, coroutine.yield()) then
+    
+    info = coroutine.yield();
+
+    if info then
         protocols[#protocols + 1] = "sslv3";
         if not lowest_protocol then lowest_protocol = 80; end
         highest_protocol = 80;
@@ -549,7 +558,10 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
     params.options = {"no_sslv3"};
     params.protocol = "tlsv1";
     test_params(target, port, params, tlsa_answer, srv_result_id);
-    if print_result(nil, coroutine.yield()) then
+
+    info = coroutine.yield();
+
+    if info then
         protocols[#protocols + 1] = "tlsv1";
         if not lowest_protocol then lowest_protocol = 90; end
         highest_protocol = 90;
@@ -559,7 +571,10 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
     params.options = {"no_sslv3","no_tlsv1"};
     params.protocol = "tlsv1_1";
     test_params(target, port, params, tlsa_answer, srv_result_id);
-    if print_result(false, coroutine.yield()) then
+
+    info = coroutine.yield();
+
+    if info then
         protocols[#protocols + 1] = "tlsv1_1";
         if not lowest_protocol then lowest_protocol = 95; end
         highest_protocol = 95;
@@ -569,7 +584,10 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
     params.options = {"no_sslv3","no_tlsv1","no_tlsv1_1"};
     params.protocol = "tlsv1_2";
     test_params(target, port, params, tlsa_answer, srv_result_id);
-    if print_result(false, coroutine.yield()) then
+
+    info = coroutine.yield();
+
+    if info then
         protocols[#protocols + 1] = "tlsv1_2";
         if not lowest_protocol then lowest_protocol = 100; end
         highest_protocol = 100;
@@ -639,7 +657,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
             ciphers[#ciphers + 1] = info;
 
-            print(cipher_string, info.cipher);
+            log("debug", "Cipher strings: " .. cipher_string " cipher: " .. info.cipher);
 
             cipher_string = cipher_string .. ":!" .. info.cipher;
 
