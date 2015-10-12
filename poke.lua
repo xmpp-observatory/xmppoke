@@ -657,7 +657,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
             ciphers[#ciphers + 1] = info;
 
-            log("debug", "Cipher strings: " .. cipher_string " cipher: " .. info.cipher);
+            log("debug", "Cipher strings: " .. cipher_string .. " cipher: " .. info.cipher);
 
             cipher_string = cipher_string .. ":!" .. info.cipher;
 
