@@ -1,4 +1,4 @@
-DROP TABLE IF EXISTS test_results, srv_results, certificates, srv_certificates, certificate_subjects, tlsa_records, ciphers, srv_ciphers, srv_certificate_errors, public_servers CASCADE;
+DROP TABLE IF EXISTS test_results, srv_results, certificates, srv_certificates, certificate_subjects, tlsa_records, ciphers, srv_ciphers, srv_certificate_errors, public_servers, srv_mechanisms, news_posts CASCADE;
 
 CREATE TABLE test_results
 ( test_id SERIAL UNIQUE
