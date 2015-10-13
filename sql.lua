@@ -19,7 +19,7 @@ function execute_and_get_id(dbh, q, ...)
     end
 end
 
-function insert_cert(dbh, cert, srv_result_id, chain_index, errors)
+function insert_cert(dbh, cert, srv_result_id, chain_index, errors, root)
     local stm = assert(dbh:prepare("SELECT certificate_id FROM certificates WHERE pem = ?"));
     local pem = cert:pem();
     assert(stm:execute(pem));
@@ -42,7 +42,7 @@ function insert_cert(dbh, cert, srv_result_id, chain_index, errors)
 
         cert_id, err = execute_and_get_id(dbh, q, pem, date(cert:notbefore()):fmt("%Y-%m-%d %T"), date(cert:notafter()):fmt("%Y-%m-%d %T"), cert:digest("sha1"), cert:digest("sha256"),
                            cert:digest("sha512"), pubkey_bitsize, pubkey_type, cert:modulus(),
-                           debian_weak_key(cert), cert:signature_alg(), false, cert:crl(), cert:ocsp(),
+                           debian_weak_key(cert), cert:signature_alg(), root, cert:crl(), cert:ocsp(),
                            hex(spki), hex(sha256(spki)), hex(sha512(spki)), cert:digest("sha512"));
 
         -- A race condition, great. Lets retry the lookup.
@@ -96,14 +96,16 @@ function insert_cert(dbh, cert, srv_result_id, chain_index, errors)
         end
     end
 
-    local srv_certificate_id = assert(execute_and_get_id(dbh, "INSERT INTO srv_certificates (srv_result_id, certificate_id, chain_index) VALUES (?, ?, ?)", srv_result_id, cert_id, chain_index));
+    if srv_result_id then
+        local srv_certificate_id = assert(execute_and_get_id(dbh, "INSERT INTO srv_certificates (srv_result_id, certificate_id, chain_index) VALUES (?, ?, ?)", srv_result_id, cert_id, chain_index));
 
-    print(srv_certificate_id);
+        print(srv_certificate_id);
 
-    local stm = assert(dbh:prepare("INSERT INTO srv_certificate_errors (srv_certificates_id, message) VALUES (?, ?)"));
+        local stm = assert(dbh:prepare("INSERT INTO srv_certificate_errors (srv_certificates_id, message) VALUES (?, ?)"));
 
-    for k,v in pairs(errors) do
-        assert(stm:execute(srv_certificate_id, v));
+        for k,v in pairs(errors) do
+            assert(stm:execute(srv_certificate_id, v));
+        end
     end
 
 
