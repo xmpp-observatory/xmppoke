@@ -8,9 +8,9 @@ require "certs"
 local sha512 = require("util.hashes").sha512;
 local sha256 = require("util.hashes").sha256;
 
-dbh = assert(dbi.Connect("PostgreSQL", "xmppoke", "xmppoke", "xmppoke", "localhost", 5433));
+dbh = assert(dbi.Connect("PostgreSQL", "xmppoke", "xmppoke", "xmppoke", "localhost", 5432));
 
-local file = io.open("ca.pem", "r");
+local file = io.open("/etc/ssl/certs/ca-certificates.crt", "r");
 
 local str = file:read("*a");
 
