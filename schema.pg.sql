@@ -1,4 +1,4 @@
-DROP TABLE IF EXISTS test_results, srv_results, certificates, srv_certificates, certificate_subjects, tlsa_records, ciphers, srv_ciphers, srv_certificate_errors, public_servers, srv_mechanisms, news_posts CASCADE;
+DROP TABLE IF EXISTS test_results, srv_results, certificates, srv_certificates, certificate_subjects, tlsa_records, ciphers, srv_ciphers, srv_certificate_errors, public_servers, srv_mechanisms, certificate_sans, news_posts CASCADE;
 
 CREATE TABLE test_results
 ( test_id SERIAL UNIQUE
@@ -262,126 +262,6 @@ INSERT INTO "ciphers" VALUES(52243,'ECDHE-RSA-CHACHA20-POLY1305','TLS_ECDHE_RSA_
 INSERT INTO "ciphers" VALUES(52244,'ECDHE-ECDSA-CHACHA20-POLY1305','TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256',256,'ECDHE','ECDSA','ChaCha20-Poly1305','AEAD',TRUE,FALSE,'TLSv1.2');
 INSERT INTO "ciphers" VALUES(52245,'DHE-RSA-CHACHA20-POLY1305','TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA25',256,'DHE','RSA','ChaCha20-Poly1305','AEAD',TRUE,FALSE,'TLSv1.2');
 
-
-GRANT ALL PRIVILEGES ON TABLE test_results, srv_results, certificates, srv_certificates, certificate_subjects, tlsa_records, ciphers, srv_ciphers, srv_certificate_errors, public_servers TO xmppoke;
-
-GRANT ALL PRIVILEGES ON SEQUENCE test_results_test_id_seq, srv_results_srv_result_id_seq, srv_results_srv_result_id_seq, tlsa_records_tlsa_record_id_seq, certificates_certificate_id_seq, certificate_subjects_certificate_subject_id_seq, srv_certificates_srv_certificates_id_seq TO xmppoke;
-
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('0nl1ne.at', 2007, 'AT');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('blah.im', 2009, 'AT');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('boese-ban.de', 2008, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('brauchen.info', 2005, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('ch3kr.net', 2013, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('chatme.im', 2010, 'IT');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('chrome.pl', 2001, 'PL');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('climm.org', 2003, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('coderollers.com', 2010, 'RO');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('codingteam.net', 2007, 'FR');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('comm.unicate.me', 2012, 'UK');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('creep.im', 2012, 'RU');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('deshalbfrei.org', 2005, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('draugr.de', 2005, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('einfachjabber.de', 2010, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('forumanalogue.fr', 2010, 'FR');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('im.apinc.org', 2004, 'FR');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('im.flosoft.biz', 2004, 'EU');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('internet-exception.de', 2009, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('is-a-furry.org', 2013, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabb3r.net', 2009, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber-br.org', 2005, 'BR');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber-hosting.de', 2005, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.at', 2010, 'AT');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.chaotic.de', 2003, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.co.nz', 2009, 'NZ');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.cz', 2001, 'CZ');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.de', 2012, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.earth.li', 2000, 'UK');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.etighichat.com', 2012, 'NG');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.fourecks.de', 2003, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.gate31.net', 2012, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.hot-chilli.net', 2005, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.i-pobox.net', 2003, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.iitsp.com', 2008, 'USA');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.loudas.com', 2009, 'NZ');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.me', 2010, 'EU');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.meta.net.nz', 2003, 'NZ');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.minus273.org', 2002, 'BG');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.no-sense.net', 2009, 'NL');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.no', 2004, 'NO');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.org', 1999, 'USA');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.rootbash.com', 2006, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.rueckgr.at', 2010, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.scha.de', 2003, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.schnied.net', 2006, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.second-home.de', 2003, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.smash-net.org', 2012, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.sow.as', 2003, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.theforest.us', 2010, 'USA');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.tmkis.com', 2009, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabber.yeahnah.co.nz', 2009, 'NZ');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabberafrica.org', 2013, 'ZA');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabberd.eu', 2009, 'RU');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabberes.org', 2003, 'ES');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabberpl.org', 2002, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabbim.com', 2005, 'CZ');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabbim.cz', 2005, 'CZ');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabbim.hu', 2013, 'HU');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabbim.pl', 2005, 'CZ');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabbim.sk', 2005, 'CZ');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabin.org', 2009, 'ID');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabme.de', 2009, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jabster.pl', 2004, 'PL');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jaim.at', 2004, 'AT');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jappix.com', 2010, 'FR');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('jisshi.com', 2012, 'IT');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('labnote.org', 2010, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('lightwitch.org', 2009, 'USA');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('limun.org', 2009, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('lsd-25.ru', 2008, 'RU');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('macjabber.de', 2006, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('mayplaces.com', 2010, 'USA');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('miqote.com', 2012, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('na-di.de', 2009, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('neko.im', 2008, 'NO');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('netmindz.net', 2002, 'UK');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('njs.netlab.cz', 2001, 'CZ');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('palemoon.net', 2013, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('palita.net', 2008, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('pandion.im', 2009, 'EU');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('pidgin.su', 2009, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('programmer-art.org', 2008, 'USA');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('prosody.de', 2010, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('richim.org', 2009, 'UA');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('rkquery.de', 2010, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('sss.chaoslab.ru', 2008, 'UA');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('sternenschweif.de', 2003, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('suchat.org', 2012, 'ES');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('swissjabber.ch', 2002, 'CH');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('swissjabber.de', 2002, 'CH');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('swissjabber.eu', 2002, 'CH');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('swissjabber.li', 2002, 'CH');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('swissjabber.org', 2002, 'CH');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('tcweb.org', 2007, 'FR');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('tekst.me', 2010, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('thiessen.im', 2005, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('thiessen.it', 2005, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('thiessen.org', 2005, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('tigase.im', 2010, 'EU');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('twattle.net', 2012, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('ubuntu-jabber.de', 2005, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('ubuntu-jabber.net', 2005, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('univers-libre.net', 2009, 'FR');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('uprod.biz', 2013, 'USA');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('verdammung.org', 2005, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('wtfismyip.com', 2012, 'USA');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('xabber.de', 2005, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('xmpp-hosting.de', 2005, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('xmpp.jp', 2009, 'JP');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('xmpp.ru.net', 2011, 'RU');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('xmppnet.de', 2003, 'DE');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('zauris.ru', 2011, 'RU');
-INSERT INTO "public_servers" (server_name, founded, country) VALUES ('zsim.de', 2009, 'DE');
-
 CREATE TABLE news_posts
 ( post_id SERIAL UNIQUE
 , post_date TIMESTAMP
@@ -395,3 +275,7 @@ CREATE TABLE srv_mechanisms
 , mechanism TEXT
 , after_tls BOOLEAN
 );
+
+GRANT ALL PRIVILEGES ON TABLE test_results, srv_results, certificates, srv_certificates, certificate_subjects, tlsa_records, ciphers, srv_ciphers, srv_certificate_errors, public_servers, certificate_sans, news_posts, srv_mechanisms TO xmppoke;
+
+GRANT ALL PRIVILEGES ON SEQUENCE test_results_test_id_seq, srv_results_srv_result_id_seq, srv_results_srv_result_id_seq, tlsa_records_tlsa_record_id_seq, certificates_certificate_id_seq, certificate_subjects_certificate_subject_id_seq, srv_certificates_srv_certificates_id_seq, certificate_sans_certificate_san_id_seq, srv_mechanisms_srv_mechanisms_id_seq TO xmppoke;
