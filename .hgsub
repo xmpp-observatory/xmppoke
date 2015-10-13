@@ -1,1 +1,3 @@
 luaunbound = http://code.zash.se/luaunbound
+luasec = [git]https://github.com/xnyhps/luasec.git
+prosody = https://hg.prosody.im/0.9/
