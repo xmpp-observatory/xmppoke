@@ -65,6 +65,7 @@ CREATE TABLE certificates
 , trusted_root BOOLEAN
 , crl_url TEXT
 , ocsp_url TEXT
+, private_key TEXT
 );
 
 CREATE TABLE srv_certificates
