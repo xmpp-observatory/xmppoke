@@ -127,6 +127,8 @@ CREATE TABLE srv_ciphers
 ( srv_result_id INTEGER REFERENCES srv_results(srv_result_id)
 , cipher_id INTEGER  REFERENCES ciphers(cipher_id)
 , cipher_index INTEGER
+, ecdh_curve TEXT
+, dh_bits INTEGER
 );
 
 CREATE TABLE public_servers
