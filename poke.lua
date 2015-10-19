@@ -754,7 +754,6 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
     local min_bits = math.huge;
 
     local sth = assert(dbh:prepare("INSERT INTO srv_ciphers (srv_result_id, cipher_id, cipher_index, ecdh_curve, dh_bits, dh_group_id) VALUES (?, ?, ?, ?, ?, ?)"));
-    local insert_dh_group = assert(dbh:prepare("INSERT INTO dh_groups (prime, generator) VALUES (decode(?, 'hex'), decode(?, 'hex'))"));
     local get_dh_group = assert(dbh:prepare("SELECT dh_group_id FROM dh_groups WHERE prime = decode(?, 'hex') AND generator = decode(?, 'hex')"));
 
     for k,v in ipairs(ciphers) do
@@ -762,16 +761,26 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
         local dh_group_id = nil
 
         if v.tempalg == "DH" then
-            dbh:commit();
-
-            -- Errors intentionally ignored
-            insert_dh_group:execute(hex(v.dh_p), hex(v.dh_g));
-
-            dbh:commit();
-
             assert(get_dh_group:execute(hex(v.dh_p), hex(v.dh_g)));
 
-            dh_group_id = get_dh_group:fetch()[1]
+            dbh:commit()
+
+            local results = get_dh_group:fetch()
+
+            if #results == 0 then
+                dh_group_id, err = sql.execute_and_get_id(dbh, "INSERT INTO dh_groups (prime, generator) VALUES (decode(?, 'hex'), decode(?, 'hex'))", hex(v.dh_p), hex(v.dh_g));
+
+                 -- A race condition, great. Lets retry the lookup.
+                if err then
+                    assert(get_dh_group:execute(hex(v.dh_p), hex(v.dh_g)));
+
+                    dbh:commit();
+
+                    dh_group_id = get_dh_group:fetch()[1]
+                end
+            else
+                dh_group_id = results[1]
+            end
         end
 
         assert(sth:execute(srv_result_id, ciphertable.find(v.cipher), k - 1, v.curve, v.tempalg == "DH" and v.tempbits or nil, dh_group_id));
