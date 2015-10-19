@@ -767,7 +767,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
             local results = get_dh_group:fetch()
 
-            if #results == 0 then
+            if not results or #results == 0 then
                 dh_group_id, err = sql.execute_and_get_id(dbh, "INSERT INTO dh_groups (prime, generator) VALUES (decode(?, 'hex'), decode(?, 'hex'))", hex(v.dh_p), hex(v.dh_g));
 
                  -- A race condition, great. Lets retry the lookup.
