@@ -221,7 +221,7 @@ function got_cert(c, tlsa_answer, srv_result_id)
                 end
             end
 
-            local stm = assert(dbh:prepare("INSERT INTO tlsa_records (srv_result_id, usage, selector, match, data, verified) VALUES (?, ?, ?, ?, ?, ?)"));
+            local stm = assert(dbh:prepare("INSERT INTO tlsa_records (srv_result_id, usage, selector, match, data, verified) VALUES (?, ?, ?, ?, decode(?, 'hex'), ?)"));
 
             for k,v in ipairs(tlsa_answer) do
                 assert(stm:execute(srv_result_id, v.tlsa.use, v.tlsa.select, v.tlsa.match, hex(v.tlsa.data), v.tlsa.found == true));
@@ -641,7 +641,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
     local cipher_string = "ALL:COMPLEMENTOFALL";
     local ciphers = {};
-    local cipher_key_score_override = nil;
+    local cipher_key_score_override = 100;
 
     for i=#protocols,1,-1 do
         local v = protocols[i];
@@ -661,8 +661,20 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
 
             cipher_string = cipher_string .. ":!" .. info.cipher;
 
-            if info.export and not cipher_key_score_override then
-                cipher_key_score_override = 40;
+            if info.export then
+                cipher_key_score_override = math.min(cipher_key_score_override, 40);
+            end
+
+            if info.tempalg == "DH" then
+                if info.tempbits < 512 then
+                    cipher_key_score_override = math.min(cipher_key_score_override, 20);
+                elseif info.tempbits < 1024 then
+                    cipher_key_score_override = math.min(cipher_key_score_override, 40);
+                elseif info.tempbits < 2014 then
+                    cipher_key_score_override = math.min(cipher_key_score_override, 80);
+                elseif info.tempbits < 4096 then
+                    cipher_key_score_override = math.min(cipher_key_score_override, 90);
+                end
             end
 
             if info.authentication == "None" then
@@ -679,10 +691,8 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
        end
     end
 
-    if cipher_key_score_override and cipher_key_score_override < public_key_score then
-        public_key_score = cipher_key_score_override;
-    end
-
+    public_key_score = math.min(public_key_score, cipher_key_score_override);
+    
     local sth = assert(dbh:prepare("UPDATE srv_results SET keysize_score = ? WHERE srv_result_id = ?"));
     assert(sth:execute(public_key_score, srv_result_id));
 
@@ -743,10 +753,28 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
     local max_bits = 0;
     local min_bits = math.huge;
 
-    local sth = assert(dbh:prepare("INSERT INTO srv_ciphers (srv_result_id, cipher_id, cipher_index) VALUES (?, ?, ?)"));
+    local sth = assert(dbh:prepare("INSERT INTO srv_ciphers (srv_result_id, cipher_id, cipher_index, ecdh_curve, dh_bits, dh_group_id) VALUES (?, ?, ?, ?, ?, ?)"));
+    local insert_dh_group = assert(dbh:prepare("INSERT INTO dh_groups (prime, generator) VALUES (decode(?, 'hex'), decode(?, 'hex'))"));
+    local get_dh_group = assert(dbh:prepare("SELECT dh_group_id FROM dh_groups WHERE prime = decode(?, 'hex') AND generator = decode(?, 'hex')"));
 
     for k,v in ipairs(ciphers) do
-        assert(sth:execute(srv_result_id, ciphertable.find(v.cipher), k - 1));
+
+        local dh_group_id = nil
+
+        if v.tempalg == "DH" then
+            dbh:commit();
+
+            -- Errors intentionally ignored
+            insert_dh_group:execute(hex(v.dh_p), hex(v.dh_g));
+
+            dbh:commit();
+
+            assert(get_dh_group:execute(hex(v.dh_p), hex(v.dh_g)));
+
+            dh_group_id = get_dh_group:fetch()[1]
+        end
+
+        assert(sth:execute(srv_result_id, ciphertable.find(v.cipher), k - 1, v.curve, v.tempalg == "DH" and v.tempbits or nil, dh_group_id));
 
         if v.bits < min_bits then min_bits = v.bits; end;
         if v.bits > max_bits then max_bits = v.bits; end;
