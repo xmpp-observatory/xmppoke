@@ -1,4 +1,4 @@
-DROP TABLE IF EXISTS test_results, srv_results, certificates, srv_certificates, certificate_subjects, tlsa_records, ciphers, srv_ciphers, srv_certificate_errors, public_servers, srv_mechanisms, certificate_sans, news_posts CASCADE;
+DROP TABLE IF EXISTS test_results, srv_results, certificates, srv_certificates, certificate_subjects, tlsa_records, ciphers, srv_ciphers, srv_certificate_errors, public_servers, srv_mechanisms, certificate_sans, news_posts, dh_groups CASCADE;
 
 CREATE TABLE test_results
 ( test_id SERIAL UNIQUE
@@ -123,12 +123,22 @@ CREATE TABLE ciphers
 , tls_version TEXT
 );
 
+CREATE TABLE dh_groups
+( dh_group_id SERIAL UNIQUE
+, prime BYTEA NOT NULL
+, generator BYTEA NOT NULL
+, group_name TEXT
+);
+
+CREATE UNIQUE INDEX dh_groups_unique ON dh_groups (prime, generator);
+
 CREATE TABLE srv_ciphers
 ( srv_result_id INTEGER REFERENCES srv_results(srv_result_id)
 , cipher_id INTEGER  REFERENCES ciphers(cipher_id)
 , cipher_index INTEGER
 , ecdh_curve TEXT
 , dh_bits INTEGER
+, dh_group_id INTEGER REFERENCES dh_groups(dh_group_id)
 );
 
 CREATE TABLE public_servers
@@ -279,6 +289,6 @@ CREATE TABLE srv_mechanisms
 , after_tls BOOLEAN
 );
 
-GRANT ALL PRIVILEGES ON TABLE test_results, srv_results, certificates, srv_certificates, certificate_subjects, tlsa_records, ciphers, srv_ciphers, srv_certificate_errors, public_servers, certificate_sans, news_posts, srv_mechanisms TO xmppoke;
+GRANT ALL PRIVILEGES ON TABLE test_results, srv_results, certificates, srv_certificates, certificate_subjects, tlsa_records, ciphers, srv_ciphers, srv_certificate_errors, public_servers, certificate_sans, news_posts, srv_mechanisms, dh_groups TO xmppoke;
 
 GRANT ALL PRIVILEGES ON SEQUENCE test_results_test_id_seq, srv_results_srv_result_id_seq, srv_results_srv_result_id_seq, tlsa_records_tlsa_record_id_seq, certificates_certificate_id_seq, certificate_subjects_certificate_subject_id_seq, srv_certificates_srv_certificates_id_seq, certificate_sans_certificate_san_id_seq, srv_mechanisms_srv_mechanisms_id_seq TO xmppoke;

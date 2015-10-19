@@ -221,7 +221,7 @@ function got_cert(c, tlsa_answer, srv_result_id)
                 end
             end
 
-            local stm = assert(dbh:prepare("INSERT INTO tlsa_records (srv_result_id, usage, selector, match, data, verified) VALUES (?, ?, ?, ?, ?, ?)"));
+            local stm = assert(dbh:prepare("INSERT INTO tlsa_records (srv_result_id, usage, selector, match, data, verified) VALUES (?, ?, ?, ?, decode(?, 'hex'), ?)"));
 
             for k,v in ipairs(tlsa_answer) do
                 assert(stm:execute(srv_result_id, v.tlsa.use, v.tlsa.select, v.tlsa.match, hex(v.tlsa.data), v.tlsa.found == true));
@@ -753,10 +753,28 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
     local max_bits = 0;
     local min_bits = math.huge;
 
-    local sth = assert(dbh:prepare("INSERT INTO srv_ciphers (srv_result_id, cipher_id, cipher_index, ecdh_curve, dh_bits) VALUES (?, ?, ?, ?, ?)"));
+    local sth = assert(dbh:prepare("INSERT INTO srv_ciphers (srv_result_id, cipher_id, cipher_index, ecdh_curve, dh_bits, dh_group_id) VALUES (?, ?, ?, ?, ?, ?)"));
+    local insert_dh_group = assert(dbh:prepare("INSERT INTO dh_groups (prime, generator) VALUES (decode(?, 'hex'), decode(?, 'hex'))"));
+    local get_dh_group = assert(dbh:prepare("SELECT dh_group_id FROM dh_groups WHERE prime = decode(?, 'hex') AND generator = decode(?, 'hex')"));
 
     for k,v in ipairs(ciphers) do
-        assert(sth:execute(srv_result_id, ciphertable.find(v.cipher), k - 1, v.curve, v.tempalg == "DH" and v.tempbits or nil));
+
+        local dh_group_id = nil
+
+        if v.tempalg == "DH" then
+            dbh:commit();
+
+            -- Errors intentionally ignored
+            insert_dh_group:execute(hex(v.dh_p), hex(v.dh_g));
+
+            dbh:commit();
+
+            assert(get_dh_group:execute(hex(v.dh_p), hex(v.dh_g)));
+
+            dh_group_id = get_dh_group:fetch()[1]
+        end
+
+        assert(sth:execute(srv_result_id, ciphertable.find(v.cipher), k - 1, v.curve, v.tempalg == "DH" and v.tempbits or nil, dh_group_id));
 
         if v.bits < min_bits then min_bits = v.bits; end;
         if v.bits > max_bits then max_bits = v.bits; end;
