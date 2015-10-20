@@ -97,7 +97,12 @@ local fail_untrusted = false;
 local fail_ssl2 = false;
 local fail_1024 = false;
 local fail_md5 = false;
+
+local cap_dh_2048 = false;
+local cap_ssl3 = false;
 local cap_2048 = false;
+local cap_compression = false;
+
 local warn_rc4_tls11 = false;
 local warn_no_fs = true;
 
@@ -377,6 +382,10 @@ function got_cert(c, tlsa_answer, srv_result_id)
         local sth = assert(dbh:prepare("UPDATE srv_results SET compression = ?, certificate_score = ?, valid_identity = ?, trusted = ? WHERE srv_result_id = ?"));
         assert(sth:execute(conn:info("compression"), certificate_score, valid_identity, chain_valid, srv_result_id));
 
+        if conn:info("compression") then
+            cap_compression = true;
+        end
+
         dbh:commit();
 
         cert_done = true;
@@ -519,6 +528,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
     public_key_score = 0;
     fail_untrusted = false;
     fail_ssl2 = false;
+    cap_ssl3 = false;
 
     local params;
 
@@ -552,6 +562,7 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
         protocols[#protocols + 1] = "sslv3";
         if not lowest_protocol then lowest_protocol = 80; end
         highest_protocol = 80;
+        cap_ssl3 = true;
     end
 
     params = deep_copy(default_params);
@@ -781,6 +792,10 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
             else
                 dh_group_id = results[1]
             end
+
+            if v.tempbits < 2048 then
+                cap_dh_2048 = true;
+            end
         end
 
         assert(sth:execute(srv_result_id, ciphertable.find(v.cipher), k - 1, v.curve, v.tempalg == "DH" and v.tempbits or nil, dh_group_id));
@@ -830,20 +845,51 @@ local function test_server(target, port, co, tlsa_answer, srv_result_id)
         final_grade = "F";
     end
 
+    -- Fail servers that have SSL3 as their best protocol.
+    if highest_protocol == 80 then
+        final_grade = "F";
+    end
+
     if cap_2048 then
         if final_grade == "A" then
             final_grade = "B";
         end
     end
 
-    if not (highest_protocol == 100) then
+    if cap_ssl3 then
+        if final_grade == "A" then
+            final_grade = "B"
+        end
+    end
+
+    if cap_dh_2048 then
         if final_grade == "A" then
             final_grade = "B";
         end
     end
 
-    local sth = assert(dbh:prepare("UPDATE srv_results SET total_score = ?, grade = ?, done = '1', warn_rc4_tls11 = ?, warn_no_fs = ? WHERE srv_result_id = ?"));
-    assert(sth:execute(total_score, final_grade, warn_rc4_tls11, warn_no_fs, srv_result_id));
+    if cap_compression then
+        if final_grade == "A" or final_grade == "B" then
+            final_grade = "C";
+        end
+    end
+
+    -- Cap to C if RC4 is used with TLS 1.1+.
+    if warn_rc4_tls11 then
+        if final_grade == "A" or final_grade == "B" then
+            final_grade = "C";
+        end
+    end
+
+    -- Cap to C if not supporting TLS 1.2.
+    if not (highest_protocol == 100) then
+        if final_grade == "A" or final_grade == "B" then
+            final_grade = "C";
+        end
+    end
+
+    local sth = assert(dbh:prepare("UPDATE srv_results SET total_score = ?, grade = ?, done = '1', warn_rc4_tls11 = ?, warn_no_fs = ?, warn_dh_2048 = ? WHERE srv_result_id = ?"));
+    assert(sth:execute(total_score, final_grade, warn_rc4_tls11, warn_no_fs, cap_dh_2048, srv_result_id));
 
     dbh:commit();
 

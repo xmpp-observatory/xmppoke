@@ -42,12 +42,13 @@ CREATE TABLE srv_results
 , a_aaaa_dnssec_bogus BOOLEAN
 , warn_rc4_tls11 BOOLEAN
 , warn_no_fs BOOLEAN
+, warn_dh_2048 BOOLEAN
 , error TEXT
 );
 
 CREATE TABLE certificates
 ( certificate_id SERIAL UNIQUE
-, pem TEXT
+, pem TEXT UNIQUE
 , notbefore TIMESTAMP
 , notafter TIMESTAMP
 , digest_sha1 TEXT
@@ -291,4 +292,4 @@ CREATE TABLE srv_mechanisms
 
 GRANT ALL PRIVILEGES ON TABLE test_results, srv_results, certificates, srv_certificates, certificate_subjects, tlsa_records, ciphers, srv_ciphers, srv_certificate_errors, public_servers, certificate_sans, news_posts, srv_mechanisms, dh_groups TO xmppoke;
 
-GRANT ALL PRIVILEGES ON SEQUENCE test_results_test_id_seq, srv_results_srv_result_id_seq, srv_results_srv_result_id_seq, tlsa_records_tlsa_record_id_seq, certificates_certificate_id_seq, certificate_subjects_certificate_subject_id_seq, srv_certificates_srv_certificates_id_seq, certificate_sans_certificate_san_id_seq, srv_mechanisms_srv_mechanisms_id_seq TO xmppoke;
+GRANT ALL PRIVILEGES ON SEQUENCE test_results_test_id_seq, srv_results_srv_result_id_seq, srv_results_srv_result_id_seq, tlsa_records_tlsa_record_id_seq, certificates_certificate_id_seq, certificate_subjects_certificate_subject_id_seq, srv_certificates_srv_certificates_id_seq, certificate_sans_certificate_san_id_seq, srv_mechanisms_srv_mechanisms_id_seq, dh_groups_dh_group_id_seq TO xmppoke;
