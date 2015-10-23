@@ -48,7 +48,7 @@ CREATE TABLE srv_results
 
 CREATE TABLE certificates
 ( certificate_id SERIAL UNIQUE
-, pem TEXT UNIQUE
+, pem TEXT
 , notbefore TIMESTAMP
 , notafter TIMESTAMP
 , digest_sha1 TEXT
