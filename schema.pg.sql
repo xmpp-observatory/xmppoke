@@ -98,8 +98,6 @@ CREATE TABLE certificate_sans
 , san_value TEXT
 );
 
-CREATE UNIQUE INDEX certificate_sans_unique ON certificate_sans (certificate_id, san_type, san_value);
-
 CREATE TABLE tlsa_records
 ( tlsa_record_id SERIAL UNIQUE
 , srv_result_id INTEGER REFERENCES srv_results(srv_result_id)
