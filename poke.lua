@@ -216,7 +216,7 @@ function got_cert(c, tlsa_answer, srv_result_id)
                                 v.tlsa.found = v.tlsa.use == 2 or chain_valid;
                             end
                         elseif v.tlsa.select == 1 then
-                            if matches_spki[v.tlsa.match] and (matches_spki[v.tlsa.match](cert) == hex(v.tlsa.data)) then
+                            if matches_spki[v.tlsa.match] and (matches_spki[v.tlsa.match](cert:spki()) == hex(v.tlsa.data)) then
                                 v.tlsa.found = v.tlsa.use == 2 or chain_valid;
                             end
                         end
