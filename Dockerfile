@@ -5,6 +5,8 @@ ENV DEBIAN_FRONTEND noninteractive
 
 ARG NCORES=1
 
+VOLUME ["/etc/xmppoke-queue"]
+
 RUN apt-get update && apt-get -y dist-upgrade && apt-get install -y --no-install-suggests lua5.1 mercurial build-essential git lua5.1-dev libz-dev libunbound-dev lua-dbi-postgresql libidn11-dev lua-socket libunbound2 luajit wget lua-expat
 
 WORKDIR /opt
@@ -24,3 +26,7 @@ RUN ln -s /opt/verse /usr/local/share/lua/5.1/
 RUN cd xmppoke && squish --use-http --no-minify --debug
 RUN cd xmppoke && sed -ri '1s/^(.*)$/_G.socket = require"socket"\n\1/' xmppoke.lua
 RUN apt-get remove -y build-essential lua5.1-dev libz-dev libunbound-dev libidn11-dev && apt-get -y autoremove && apt clean
+RUN apt-get install -y --no-install-suggests python-twisted
+RUN git clone https://github.com/horazont/xmppoke-queue --depth 1
+
+CMD /usr/bin/python2 /opt/xmppoke-queue/xmppoke_queue.py -c /etc/xmppoke-queue/config.ini
