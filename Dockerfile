@@ -3,8 +3,6 @@ MAINTAINER Jonas Wielicki <jonas@wielicki.name>
 
 ENV DEBIAN_FRONTEND noninteractive
 
-VOLUME ["/etc/xmppoke-queue"]
-
 RUN apt-get update && apt-get -y dist-upgrade && apt-get install -y --no-install-suggests lua5.1 mercurial build-essential git lua5.1-dev libz-dev libunbound-dev lua-dbi-postgresql libidn11-dev lua-socket libunbound2 luajit wget lua-expat python-twisted
 
 WORKDIR /opt
@@ -27,4 +25,4 @@ RUN apt-get remove -y build-essential lua5.1-dev libz-dev libunbound-dev libidn1
 RUN git clone https://github.com/horazont/xmppoke-queue --depth 1
 RUN rm squish prosody openssl -rf
 
-CMD /usr/bin/python2 /opt/xmppoke-queue/xmppoke_queue.py -c /etc/xmppoke-queue/config.ini
+CMD /usr/bin/python2 /opt/xmppoke-queue/xmppoke_queue.py
