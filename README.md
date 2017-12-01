@@ -18,12 +18,9 @@ Build the docker image as usual.
 
 The docker image exposes the following interface:
 
-* ``/etc/xmppoke-queue`` volume which hosts
-  the
-  [XMPPoke Queue Manager](https://github.com/horazont/xmppoke-queue/blob/master/xmppoke_queue.py) config.
-
-  See the linked repository for config hints. The configuration file is expected
-  in ``/etc/xmppoke-queue/config.ini``.
+* The
+  [XMPPoke Queue Manager](https://github.com/horazont/xmppoke-queue/) expects
+  some environment variables as configuration. See there for details.
 
 * The XMPPoke Queue Manager is the command which is run by default when running
   the image as a container.
