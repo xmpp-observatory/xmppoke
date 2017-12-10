@@ -16,11 +16,12 @@ RUN cd xmppoke/luasec && make "INC_PATH=-I/opt/local/include -I/usr/include -I/u
 RUN cd xmppoke/luaunbound && CFLAGS=-I/usr/include/lua5.1 make && make LUA_LIBDIR=/usr/local/lib/lua/5.1/ install && cp lunbound.so ../util/
 RUN cd verse && ./configure && make && make install
 RUN ln -s /opt/verse /usr/local/share/lua/5.1/
-RUN cd xmppoke && squish --use-http --no-minify --debug
-RUN cd xmppoke && sed -ri '1s/^(.*)$/_G.socket = require"socket"\n\1/' xmppoke.lua
+RUN cd xmppoke && sed -ri '/local proxy_port/s/9150/9050/;/settimeout/s/5/10/' onions.lua && squish --use-http --no-minify --debug && sed -ri '1s/^(.*)$/_G.socket = require"socket"\n\1/' xmppoke.lua
+RUN apt-get install -y --no-install-suggests --no-install-recommends tor
 RUN apt-get remove -y build-essential lua5.1-dev libz-dev libunbound-dev libidn11-dev && apt-get -y autoremove && apt clean
 RUN git clone https://github.com/horazont/xmppoke-queue --depth 1
+COPY docker-entrypoint.sh /
 
 EXPOSE 1337
 
-CMD /usr/bin/python2 /opt/xmppoke-queue/xmppoke_queue.py
+CMD /docker-entrypoint.sh
