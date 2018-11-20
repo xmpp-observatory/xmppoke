@@ -946,7 +946,7 @@ co = coroutine.create(function ()
 
     local stm = assert(dbh:prepare("UPDATE test_results SET srv_dnssec_good = ?, srv_dnssec_bogus = ? WHERE test_id = ?"));
 
-    assert(stm:execute(srv_records and srv_records.secure, srv_records and srv_records.bogus, result_id));
+    assert(stm:execute(srv_records and srv_records.secure, srv_records and not not srv_records.bogus, result_id));
 
     if not (srv_records and #srv_records > 0) then
         local port = (mode == "client" and 5222) or 5269;
