@@ -974,7 +974,7 @@ co = coroutine.create(function ()
 
             local tlsa_answer, err = adns.dns.lookup(tlsa, "TLSA");
 
-            srv_id = assert(sql.execute_and_get_id(dbh, q, result_id, srv.priority, srv.weight, srv.port, srv.target, tlsa_answer.secure, tlsa_answer.bogus));
+            srv_id = assert(sql.execute_and_get_id(dbh, q, result_id, srv.priority, srv.weight, srv.port, srv.target, tlsa_answer.secure, not not tlsa_answer.bogus));
 
             dbh:commit();
         else
