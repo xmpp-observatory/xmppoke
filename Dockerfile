@@ -6,7 +6,11 @@ ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update && apt-get -y dist-upgrade && apt-get install -y --no-install-suggests lua5.1 mercurial build-essential git lua5.1-dev libz-dev libunbound-dev lua-dbi-postgresql libidn11-dev lua-socket libunbound2 luajit wget lua-expat python-twisted
 
 WORKDIR /opt
-RUN hg clone https://bitbucket.org/mattj/xmppoke
+COPY . xmppoke/
+WORKDIR /opt/xmppoke/
+RUN git clone https://github.com/xnyhps/luasec.git && cd luasec && git checkout 64bebd9c9283ce11dfa60945938d0a529861d824 && cd ..
+RUN hg clone http://code.zash.se/luaunbound/ && cd luaunbound && hg update -r b4b293593d0ef64d623a54a8b8d2c1dea4c5e870 && cd .. 
+WORKDIR /opt/
 RUN hg clone http://code.matthewwild.co.uk/verse/
 RUN mkdir xmppoke/util
 RUN hg clone http://code.matthewwild.co.uk/squish/ && cd squish && make && make install && cd .. && rm squish -rf
