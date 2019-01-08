@@ -3,7 +3,7 @@ Output "xmppoke.lua"
 Module "core.configmanager" "configmanager.lua"
 Module "onions" "onions.lua"
 
-AutoFetchURL "http://code.zash.se/luaunbound/raw-file/b4b293593d0e/?"
+AutoFetchURL "https://code.zash.se/luaunbound-prosody/raw-file/81ae4f6fa79c/?"
 
 Module "net.adns" "net.unbound.lua"
 Module "util.dns" "util.dns.lua"
