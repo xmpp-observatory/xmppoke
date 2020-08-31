@@ -18,7 +18,7 @@ function verse.plugins.tls(stream)
 	local function handle_tls(tls_status)
 		if tls_status.name == "proceed" then
 			stream:debug("Server says proceed, handshake starting...");
-			stream.conn:starttls(stream.tlsparams or {mode="client", protocol="sslv23", options="no_sslv2"}, true);
+			stream.conn:starttls(stream.tlsparams or {mode="client", protocol="tls", options="no_sslv3"}, true);
 		end
 	end
 	local function handle_status(new_status)
