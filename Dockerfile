@@ -8,13 +8,13 @@ RUN apt-get update && apt-get -y dist-upgrade && apt-get install -y --no-install
 WORKDIR /opt
 COPY . xmppoke/
 WORKDIR /opt/xmppoke/
-RUN git clone https://github.com/xnyhps/luasec.git  && cd luasec && git checkout 64bebd9c9283ce11dfa60945938d0a529861d824 && cd ..
+RUN git clone https://github.com/brunoos/luasec.git
 RUN hg clone http://code.zash.se/luaunbound/ && cd luaunbound && hg update -r 8356eb09ebaa && cd ..
 WORKDIR /opt/
 RUN hg clone http://code.matthewwild.co.uk/verse/
 RUN mkdir xmppoke/util
 RUN hg clone http://code.matthewwild.co.uk/squish/ && cd squish && make && make install && cd .. && rm squish -rf
-RUN git clone https://github.com/PeterMosmans/openssl --depth 1 && cd openssl && ./config --prefix=/usr/local/ --openssldir=/etc/ssl enable-zlib enable-ssl2 enable-rc5 enable-rc2 enable-GOST enable-cms enable-md2 enable-mdc2 enable-ec enable-ec2m enable-ecdh enable-ecdsa enable-seed enable-camellia enable-idea enable-rfc3779 enable-ec_nistp_64_gcc_128 experimental-jpake shared -DOPENSSL_USE_BUILD_DATE && make depend && make && make install && cd .. && rm -rf openssl
+RUN git clone https://github.com/openssl/openssl --depth 1 && cd openssl && ./Configure --prefix=/usr/local/ --openssldir=/etc/ssl '-Wl,-rpath,$(LIBRPATH)' enable-zlib enable-ssl2 enable-rc5 enable-rc2 enable-gost enable-cms enable-md2 enable-mdc2 enable-ec enable-ec2m enable-ecdh enable-ecdsa enable-seed enable-camellia enable-idea enable-rfc3779 enable-ec_nistp_64_gcc_128 && make depend && make && make install && cd .. && rm -rf openssl
 RUN hg clone https://hg.prosody.im/0.9/ prosody && cd prosody && ./configure --with-lua-include=/usr/include/lua5.1 && make && cp util/encodings.so util/hashes.so ../xmppoke/util/ && cd .. && rm prosody -rf
 RUN cd xmppoke/luasec && make "INC_PATH=-I/opt/local/include -I/usr/include -I/usr/local/include -I/usr/include/lua5.1" linux && make LUACPATH=/usr/local/lib/lua/5.1 LUAPATH=/usr/local/share/lua/5.1 install
 RUN cd xmppoke/luaunbound && make -B LUA_VERSION=5.1 CFLAGS='-fPIC -I/usr/include/lua5.1 -DIANA_ROOT_TA_FILE=\"/usr/share/dns/root.ds\"' && cp lunbound.so ../
